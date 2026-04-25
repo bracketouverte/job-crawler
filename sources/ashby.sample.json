@@ -1,0 +1,9 @@
+{
+  "provider": "ashby",
+  "url_template": "https://jobs.ashbyhq.com/{identifier}",
+  "companies": [
+    {
+      "identifier": "example-company"
+    }
+  ]
+}

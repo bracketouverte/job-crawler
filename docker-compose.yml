@@ -1,0 +1,53 @@
+services:
+  job-parser:
+    build:
+      context: ./matcher
+    working_dir: /app
+    entrypoint: ["python", "/app/job_post_parser.py"]
+    command: ["--help"]
+    volumes:
+      - ./matcher:/app
+    restart: "no"
+
+  matcher:
+    build:
+      context: ./matcher
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    environment:
+      CAREER_OPS_DIR: ${CAREER_OPS_DIR:-career-ops}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_MODEL: ${NVIDIA_MODEL:-meta/llama-3.1-70b-instruct}
+    volumes:
+      - ./matcher:/app
+    restart: "no"
+
+  viewer:
+    build:
+      context: ./viewer
+    env_file:
+      - ./.env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./viewer/public:/app/public:ro
+      - /home/michael/www/job-scrapper/crawler/state:/app/state
+    environment:
+      CATALOG_DB: /app/state/catalog.sqlite
+      LOGO_DEV_PUBLISHABLE_KEY: ${LOGO_DEV_PUBLISHABLE_KEY:-}
+      LOGO_DEV_SECRET_KEY: ${LOGO_DEV_SECRET_KEY:-}
+    restart: unless-stopped
+
+  crawler:
+    build:
+      context: ./crawler
+    volumes:
+      - ./sources:/data/sources:ro
+      - ./crawler/output:/app/output
+      - ./crawler/state:/app/state
+    command:
+      - --catalog-db
+      - /app/state/catalog.sqlite
+      - --catalog-file
+      - /app/output/current-jobs.jsonl

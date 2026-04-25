@@ -1,0 +1,9 @@
+{
+  "provider": "bamboohr",
+  "url_template": "https://{identifier}.bamboohr.com/careers",
+  "companies": [
+    {
+      "identifier": "example-company"
+    }
+  ]
+}

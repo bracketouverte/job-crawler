@@ -1,0 +1,31 @@
+.codex
+.claude/
+.DS_Store
+node_modules/
+dist/
+*.log
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.env
+
+# Local crawler build/output artifacts (never commit)
+crawler/output/*
+!crawler/output/.gitkeep
+
+# Local crawler state artifacts (never commit)
+crawler/state/*
+!crawler/state/.gitkeep
+
+# Local source datasets (never commit)
+sources/*.json
+!sources/*.sample.json
+
+# Local matcher artifacts (never commit)
+matcher/.tmp_*
+matcher/*_report.json
+matcher/__pycache__/
+matcher/*/profile.yml
+matcher/*/portals.yml
+matcher/*/cv.md
+matcher/*/_profile.md

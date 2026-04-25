@@ -1,0 +1,9 @@
+{
+  "provider": "teamtailor",
+  "url_template": "https://{identifier}.teamtailor.com",
+  "companies": [
+    {
+      "identifier": "example-company"
+    }
+  ]
+}

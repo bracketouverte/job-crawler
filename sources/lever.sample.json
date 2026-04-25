@@ -1,0 +1,9 @@
+{
+  "provider": "lever",
+  "url_template": "https://jobs.lever.co/{identifier}",
+  "companies": [
+    {
+      "identifier": "example-company"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "provider": "greenhouse",
+  "url_template": "https://job-boards.greenhouse.io/{identifier}",
+  "companies": [
+    {
+      "identifier": "example-company"
+    }
+  ]
+}

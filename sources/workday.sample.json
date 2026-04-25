@@ -1,0 +1,11 @@
+{
+  "provider": "workday",
+  "url_template": "https://{tenant}.{shard}.myworkdayjobs.com/en-US/{site}",
+  "companies": [
+    {
+      "tenant": "exampletenant",
+      "shard": "wd1",
+      "site": "careers"
+    }
+  ]
+}
