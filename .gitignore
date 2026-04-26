@@ -20,6 +20,7 @@ crawler/state/*
 # Local source datasets (never commit)
 sources/*.json
 !sources/*.sample.json
+!sources/workable.json
 
 # Local matcher artifacts (never commit)
 matcher/.tmp_*

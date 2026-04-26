@@ -36,6 +36,7 @@ export class CatalogStore {
 
   constructor(dbPath: string) {
     this.db = new Database(dbPath);
+    this.db.pragma("busy_timeout = 30000");
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");

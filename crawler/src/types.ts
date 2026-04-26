@@ -4,7 +4,8 @@ export const providers = [
   "greenhouse",
   "lever",
   "teamtailor",
-  "workday"
+  "workable",
+  "workday",
 ] as const;
 
 export type Provider = (typeof providers)[number];

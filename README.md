@@ -6,7 +6,7 @@
 
 It has three main modules:
 
-- `crawler/` collects public job postings from providers like Greenhouse, Lever, Ashby, BambooHR, Teamtailor, and Workday.
+- `crawler/` collects public job postings from providers like Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, and Workable.
 - `matcher/` extracts structured job-post data from a posting URL and runs fit analysis against a profile.
 - `viewer/` serves a lightweight UI over the crawler catalog so jobs can be searched and reviewed locally.
 
@@ -105,7 +105,7 @@ Open `http://localhost:3000`.
 - SQLite for the local job catalog
 - Docker Compose for local orchestration
 - NVIDIA NIM for fit-analysis inference
-- Public ATS APIs and page metadata from Greenhouse, Lever, Ashby, BambooHR, Teamtailor, and Workday
+- Public ATS APIs and page metadata from Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, and Workable
 
 ## Module Docs
 
@@ -115,4 +115,4 @@ Open `http://localhost:3000`.
 
 ## Let's Connect
 
-- LinkedIn: https://www.linkedin.com/in/michael-levy-product/
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Michael%20Levy-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/michael-levy-product/)

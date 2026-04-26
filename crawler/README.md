@@ -1,6 +1,7 @@
 # Crawler
 
 The `crawler` module collects public ATS job boards into a normalized local catalog.
+Supported providers include Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, and Workable.
 
 It writes:
 

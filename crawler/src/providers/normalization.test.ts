@@ -5,6 +5,7 @@ import { normalizeBambooJob } from "./bamboohr.js";
 import { normalizeGreenhouseJob } from "./greenhouse.js";
 import { normalizeLeverJob } from "./lever.js";
 import { normalizeTeamtailorJob } from "./teamtailor.js";
+import { normalizeWorkableJob } from "./workable.js";
 import { normalizeWorkdayJob } from "./workday.js";
 
 const fetchedAt = "2026-04-15T00:00:00.000Z";
@@ -102,4 +103,27 @@ test("normalizes Workday jobs", () => {
 
   assert.equal(job.job_id, "R1");
   assert.equal(job.job_url, "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Analyst_R1");
+});
+
+test("normalizes Workable jobs", () => {
+  const job = normalizeWorkableJob("peaksware", {
+    title: "Product Manager",
+    shortcode: "ABC123",
+    employment_type: "Full-time",
+    telecommuting: true,
+    department: "Product",
+    url: "https://apply.workable.com/j/ABC123",
+    published_on: "2026-04-24",
+    city: "Louisville",
+    state: "Colorado",
+    country: "United States",
+    locations: [{ city: "Louisville", region: "Colorado", country: "United States" }]
+  }, fetchedAt);
+
+  assert.equal(job.provider, "workable");
+  assert.equal(job.job_id, "ABC123");
+  assert.equal(job.department, "Product");
+  assert.equal(job.location, "Louisville, Colorado, United States");
+  assert.equal(job.office, "Remote");
+  assert.equal(job.updated_at, "2026-04-24");
 });
