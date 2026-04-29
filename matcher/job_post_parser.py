@@ -10,7 +10,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -65,10 +65,24 @@ def fetch_text(url, *, headers=None):
     return response.text
 
 
+def slugify_token(value):
+    lowered = str(value or "").strip().lower()
+    lowered = lowered.replace("&", "and")
+    lowered = re.sub(r"[^a-z0-9]+", "", lowered)
+    return lowered
+
+
 def detect_provider(url):
     parsed = urlparse(url)
     host = parsed.netloc.lower()
     path = parsed.path
+
+    if "gh_jid=" in parsed.query.lower():
+        return "greenhouse"
+    if "grnhse" in host or "greenhouse" in host:
+        return "greenhouse"
+    if re.search(r"/jobs?/\d+/?$", path):
+        return "greenhouse"
 
     if "greenhouse.io" in host:
         return "greenhouse"
@@ -88,6 +102,8 @@ def detect_provider(url):
 
 def detect_provider_from_page(raw_html):
     lowered = raw_html.lower()
+    if "boards.greenhouse.io/embed/job_board/js?for=" in lowered or 'id="grnhse_app"' in lowered or "gh_jid=" in lowered:
+        return "greenhouse"
     if "teamtailor" in lowered or "teamtailor-cdn.com" in lowered:
         return "teamtailor"
     if "jobs.ashbyhq.com" in lowered:
@@ -218,8 +234,8 @@ def infer_compensation(explicit, text):
         return explicit
 
     for line in html_to_lines(text):
-        lowered = line.lower()
-        if re.search(r"[$€£]\s?\d", line) or re.search(r"\b(salary|compensation|ote|hourly|base pay|pay range)\b", lowered):
+        # Only match lines with a real salary figure: $120,000 / €90 000 / £80k–£100k style
+        if re.search(r"[$€£]\s?\d{2,3}[,\s]?\d{3}", line) or re.search(r"[$€£]\s?\d{2,3}[kK]\b", line):
             return line
     return None
 
@@ -280,12 +296,92 @@ def build_result(url, provider, title, posted_datetime, location, compensation, 
     }
 
 
-def parse_greenhouse(url):
+def extract_greenhouse_identifiers(url, raw_html=None):
     parsed = urlparse(url)
-    match = re.search(r"/([^/]+)/jobs/(\d+)", parsed.path)
-    if not match:
-        raise ValueError(f"Unsupported Greenhouse URL: {url}")
-    company, job_id = match.groups()
+    host = parsed.netloc.lower()
+
+    path_match = re.search(r"/([^/]+)/jobs/(\d+)", parsed.path)
+    if path_match and "greenhouse.io" in host:
+        return path_match.groups()
+
+    query = parse_qs(parsed.query)
+    job_id = None
+    for key in ("gh_jid", "gh_src"):
+        values = query.get(key) or []
+        for value in values:
+            value = str(value).strip()
+            if value.isdigit():
+                job_id = value
+                break
+        if job_id:
+            break
+
+    if job_id is None:
+        tail_match = re.search(r"/jobs?/(\d+)/?$", parsed.path)
+        if tail_match:
+            job_id = tail_match.group(1)
+        else:
+            digit_runs = re.findall(r"\b(\d{7,})\b", parsed.path)
+            if digit_runs:
+                job_id = digit_runs[-1]
+
+    company = None
+    if raw_html:
+        embed_match = re.search(r"boards\.greenhouse\.io/embed/job_board/js\?for=([A-Za-z0-9_-]+)", raw_html, flags=re.I)
+        if embed_match:
+            company = embed_match.group(1)
+        else:
+            board_match = re.search(r'["\']board(?:Token|Name)?["\']\s*[:=]\s*["\']([A-Za-z0-9_-]+)["\']', raw_html, flags=re.I)
+            if board_match:
+                company = board_match.group(1)
+
+    if company and job_id:
+        return company, job_id
+    raise ValueError(f"Unsupported Greenhouse URL: {url}")
+
+
+def greenhouse_page_data_url(url):
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/")
+    if not path:
+        path = "/"
+    return f"{parsed.scheme}://{parsed.netloc}/page-data{path}/page-data.json"
+
+
+def extract_greenhouse_identifiers_from_page_data(url):
+    payload = fetch_json(greenhouse_page_data_url(url))
+    page_context = ((payload.get("result") or {}).get("pageContext") or {})
+    job = page_context.get("job") or {}
+
+    job_id = job.get("id")
+    company_name = job.get("company_name")
+    company = slugify_token(company_name)
+
+    if isinstance(job_id, int):
+        job_id = str(job_id)
+    elif isinstance(job_id, str):
+        job_id = job_id.strip()
+    else:
+        job_id = None
+
+    if company and job_id and job_id.isdigit():
+        return company, job_id
+    raise ValueError(f"Could not extract Greenhouse identifiers from page-data for URL: {url}")
+
+
+def parse_greenhouse(url):
+    raw_html = None
+    parsed = urlparse(url)
+    is_canonical_greenhouse = "greenhouse.io" in parsed.netloc.lower()
+    if not is_canonical_greenhouse:
+        raw_html = fetch_text(url)
+    try:
+        company, job_id = extract_greenhouse_identifiers(url, raw_html=raw_html)
+    except Exception:
+        if not raw_html:
+            raise
+        company, job_id = extract_greenhouse_identifiers_from_page_data(url)
+
     payload = fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{company}/jobs/{job_id}?content=true")
     content = html.unescape(html.unescape(payload.get("content", "")))
     sections = extract_sections_from_html(content)

@@ -18,7 +18,7 @@ https://github.com/santifer/career-ops
 - Crawl multiple ATS providers into a normalized job catalog.
 - Persist jobs in SQLite and export the latest snapshot as JSONL.
 - Parse a single posting URL into structured fields such as title, location, employment type, workplace type, requirements, and responsibilities.
-- Run profile-to-job fit scoring with NVIDIA NIM.
+- Run both quick-fit and full-fit job scoring with NVIDIA NIM.
 - Browse the local catalog from a simple web UI.
 - Run the whole stack with Docker Compose.
 
@@ -90,6 +90,17 @@ docker compose run --rm matcher \
   -p /app \
   -o /app/.tmp_marqeta_7711098_report.json
 ```
+
+Batch analysis of structured job payloads:
+
+```bash
+docker compose run --rm matcher \
+  --jobs-jsonl /app/jobs.jsonl \
+  --results-jsonl /app/results.jsonl \
+  -p /app
+```
+
+The default quick-fit pipeline uses `meta/llama-4-maverick-17b-128e-instruct`. A separate full-fit ensemble pipeline is available under `matcher/ensemble_runner.py` for multi-model scoring plus synthesis.
 
 `CAREER_OPS_DIR` is configured in `.env` and `.env.example`, so each user can choose their own local folder name under `matcher/`. Those generated profile files are intentionally not tracked in Git.
 
