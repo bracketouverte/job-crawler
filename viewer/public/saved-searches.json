@@ -1,0 +1,29 @@
+[
+  {
+    "id": "saved-product-general",
+    "label": "Product",
+    "title": "product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
+    "location": "remote",
+    "company": "",
+    "sources": [],
+    "days": "7"
+  },
+  {
+    "id": "saved-technical-product",
+    "label": "Technical PM",
+    "title": "technical product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
+    "location": "remote",
+    "company": "",
+    "sources": [],
+    "days": "7"
+  },
+  {
+    "id": "saved-ai-product",
+    "label": "AI Product",
+    "title": "(ai,llm,agentic,platform) product (manager,owner,builder)",
+    "location": "remote",
+    "company": "",
+    "sources": [],
+    "days": "14"
+  }
+]

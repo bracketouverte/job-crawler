@@ -3,1271 +3,153 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Job Viewer</title>
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-    integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
-    crossorigin="anonymous"
-  />
-  <style>
-    :root {
-      --viewer-bg: #f5f5f5;
-      --viewer-panel: #ffffff;
-      --viewer-ink: #1f1f1f;
-      --viewer-muted: #666666;
-      --viewer-accent: #2f2f2f;
-      --viewer-accent-soft: #efefef;
-      --viewer-border: #dddddd;
-      --viewer-shadow: none;
-    }
-
-    body {
-      font-family: "Segoe UI", sans-serif;
-      background: var(--viewer-bg);
-      color: var(--viewer-ink);
-      min-height: 100vh;
-      padding-bottom: 2rem;
-    }
-
-    .app-shell {
-      max-width: 1440px;
-      margin: 0 auto;
-      padding: 1rem 1rem 0;
-    }
-
-    .panel-card,
-    .table-panel {
-      background: var(--viewer-panel);
-      border: 1px solid var(--viewer-border);
-      border-radius: 6px;
-      box-shadow: var(--viewer-shadow);
-    }
-
-    .panel-card {
-      position: relative;
-      padding: 1rem;
-      color: var(--viewer-ink);
-    }
-
-    #stats {
-      color: var(--viewer-muted);
-      line-height: 1.6;
-      text-align: left;
-    }
-
-    .section-label {
-      font-size: 0.72rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--viewer-muted);
-    }
-
-    .filters-heading {
-      display: flex;
-      flex-direction: column;
-      gap: 0.3rem;
-    }
-
-    .filters-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 0.9rem;
-      align-items: end;
-      margin-top: 0.9rem;
-    }
-
-    .filter-title-field {
-      grid-column: 1 / -1;
-    }
-
-    .filters-grid .form-label,
-    .saved-searches-label {
-      font-size: 0.72rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--viewer-muted);
-    }
-
-    .form-control,
-    .form-select,
-    .dropdown-toggle.form-control-like {
-      border-color: #cccccc;
-      border-radius: 4px;
-      min-height: 2.5rem;
-      box-shadow: none;
-      background: #ffffff;
-    }
-
-    .form-control:focus,
-    .form-select:focus,
-    .dropdown-toggle.form-control-like:focus,
-    .dropdown-toggle.form-control-like.show {
-      border-color: #999999;
-      box-shadow: none;
-    }
-
-    .dropdown-toggle.form-control-like {
-      color: var(--viewer-ink);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      text-align: left;
-      width: 100%;
-    }
-
-    .dropdown-toggle.form-control-like::after {
-      margin-left: 0.75rem;
-    }
-
-    .providers-menu {
-      width: 100%;
-      max-height: 18rem;
-      overflow-y: auto;
-      border-radius: 4px;
-      border: 1px solid #cccccc;
-      background: #ffffff;
-      box-shadow: none;
-      padding: 0.25rem;
-      z-index: 2000;
-    }
-
-    .providers-menu .dropdown-item {
-      border-radius: 4px;
-      padding: 0.45rem 0.6rem;
-    }
-
-    .providers-menu .dropdown-item:hover,
-    .providers-menu .dropdown-item:focus {
-      background: #f3f3f3;
-    }
-
-    .providers-menu .form-check-input {
-      margin-top: 0.15rem;
-    }
-
-    .providers-menu .form-check-label {
-      color: var(--viewer-ink);
-      user-select: none;
-    }
-
-    .title-label-row {
-      display: flex;
-      align-items: center;
-      gap: 0.45rem;
-    }
-
-    .saved-strip {
-      padding: 1rem;
-      z-index: 10;
-    }
-
-    .favorites-form {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .favorites-form .form-control {
-      min-width: 220px;
-    }
-
-    .favorites-toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-    }
-
-    .favorites-manage-btn {
-      white-space: nowrap;
-    }
-
-    .favorites-controls {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-    }
-
-    .favorites-only {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.55rem;
-      padding: 0.45rem 0.7rem;
-      border: 1px solid #cccccc;
-      border-radius: 4px;
-      background: #ffffff;
-      color: var(--viewer-ink);
-    }
-
-    .favorites-only .form-check-input {
-      margin-top: 0;
-      margin-left: 0;
-      cursor: pointer;
-      float: none;
-    }
-
-    .favorites-only .form-check-label {
-      cursor: pointer;
-      user-select: none;
-      font-size: 0.88rem;
-    }
-
-    .favorite-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-    }
-
-    .favorite-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.45rem;
-      padding: 0.35rem 0.6rem;
-      border-radius: 4px;
-      border: 1px solid #cccccc;
-      background: #f8f8f8;
-      color: var(--viewer-ink);
-      font-size: 0.82rem;
-    }
-
-    .favorite-chip-remove {
-      width: 1.1rem;
-      height: 1.1rem;
-      border: 0;
-      border-radius: 2px;
-      background: #e9e9e9;
-      color: inherit;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      line-height: 1;
-      padding: 0;
-    }
-
-    .favorite-chip-remove:hover {
-      background: #dcdcdc;
-    }
-
-    .search-btn {
-      border-radius: 4px;
-      border-color: #cccccc;
-      color: var(--viewer-ink);
-      background: #fff;
-    }
-
-    .search-btn:hover,
-    .search-btn.active {
-      color: #fff;
-      background: #444444;
-      border-color: #444444;
-    }
-
-    .job-title a {
-      color: var(--viewer-ink);
-      text-decoration: none;
-      font-weight: 600;
-    }
-
-    .job-title a:hover {
-      color: #000000;
-      text-decoration: underline;
-    }
-
-    .table-panel {
-      margin-top: 1.25rem;
-      overflow: visible;
-    }
-
-    .filters-panel {
-      margin-top: 1.25rem;
-      padding: 1rem;
-      z-index: 30;
-    }
-
-    .hide-btn {
-      width: 2rem;
-      height: 2rem;
-      border-radius: 4px;
-      border: 1px solid #d0d0d0;
-      background: #ffffff;
-      color: #777777;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      transition: transform 0.12s ease, background 0.12s ease;
-    }
-
-    .hide-btn:hover {
-      transform: none;
-      background: #f2f2f2;
-    }
-
-    .row-actions {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.35rem;
-    }
-
-    .favorite-btn {
-      width: 2rem;
-      height: 2rem;
-      border-radius: 4px;
-      border: 1px solid #d0d0d0;
-      background: #ffffff;
-      color: #888888;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-      transition: transform 0.12s ease, background 0.12s ease, color 0.12s ease;
-    }
-
-    .favorite-btn:hover {
-      transform: none;
-      background: #f2f2f2;
-      color: #666666;
-    }
-
-    .favorite-btn.is-favorite {
-      background: #f6d54a;
-      color: #5c4700;
-      border-color: #dfbb1d;
-    }
-
-    td.hide-cell {
-      width: 5.25rem;
-      text-align: center;
-    }
-
-    .table {
-      margin-bottom: 0;
-    }
-
-    .table thead th {
-      background: #f3f3f3;
-      color: var(--viewer-muted);
-      font-size: 0.72rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      border-bottom-width: 1px;
-    }
-
-    .table tbody td {
-      padding-top: 0.95rem;
-      padding-bottom: 0.95rem;
-      vertical-align: middle;
-      background: transparent;
-      transition: background-color 0.18s ease;
-    }
-
-    .table tbody tr:hover td {
-      background: #fafafa;
-    }
-
-    .table tbody tr.visited-row td {
-      background: #f5f5dc;
-    }
-
-    .table tbody tr.visited-row:hover td {
-      background: #f0f0d2;
-    }
-
-    .table tbody tr.favorite-row:not(.visited-row) td {
-      background: #f7f7f7;
-    }
-
-    .table tbody tr.favorite-row:not(.visited-row):hover td {
-      background: #f0f0f0;
-    }
-
-    .visited-flag {
-      display: none;
-      margin-left: 0.5rem;
-      padding: 0.2rem 0.45rem;
-      border-radius: 4px;
-      background: #eeeeee;
-      font-size: 0.7rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--viewer-muted);
-    }
-
-    .visited-row .visited-flag {
-      display: inline-flex;
-      align-items: center;
-    }
-
-    .provider-badge {
-      background: #efefef;
-      color: #444444;
-      border: 1px solid #dddddd;
-    }
-
-    .company-cell {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      min-width: 0;
-    }
-
-    .company-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.75rem;
-      min-width: 0;
-      color: inherit;
-      text-decoration: none;
-    }
-
-    .company-link:hover {
-      color: inherit;
-      text-decoration: underline;
-    }
-
-    .company-logo-frame {
-      width: 32px;
-      height: 32px;
-      flex: 0 0 32px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      border-radius: 6px;
-      background: #f4f4f4;
-      border: 1px solid #e3e3e3;
-      color: #5b5b5b;
-      font-size: 0.82rem;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-
-    .company-logo {
-      width: 100%;
-      height: 100%;
-      display: block;
-      object-fit: contain;
-      background: #ffffff;
-    }
-
-    .company-name-wrap {
-      min-width: 0;
-    }
-
-    .location-text {
-      display: inline-block;
-      max-width: 40ch;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      vertical-align: bottom;
-    }
-
-    .viewer-footer {
-      margin-top: 1rem;
-      padding: 0.25rem 0 1.5rem;
-      text-align: center;
-      color: var(--viewer-muted);
-      font-size: 0.88rem;
-    }
-
-    .viewer-footer a {
-      color: inherit;
-    }
-
-    .age-badge {
-      border-radius: 4px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      padding: 0.35rem 0.55rem;
-    }
-
-    .hint-trigger {
-      width: 1.35rem;
-      height: 1.35rem;
-      border: 1px solid #cccccc;
-      border-radius: 4px;
-      background: #ffffff;
-      color: var(--viewer-muted);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.78rem;
-      font-weight: 700;
-      line-height: 1;
-      padding: 0;
-      cursor: help;
-    }
-
-    .tooltip {
-      --bs-tooltip-bg: #1a1a1a;
-      --bs-tooltip-color: #fff;
-    }
-
-    #result-count {
-      font-size: 0.95rem;
-      color: var(--viewer-muted);
-    }
-
-    #page-info {
-      min-width: 7rem;
-      text-align: center;
-      font-weight: 600;
-      color: var(--viewer-muted);
-    }
-
-    #loading,
-    #empty {
-      padding: 3rem 1.5rem;
-    }
-
-    @media (max-width: 991px) {
-      .filters-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .filter-title-field {
-        grid-column: 1 / -1;
-      }
-    }
-
-    @media (max-width: 767px) {
-      .app-shell {
-        padding-inline: 0.75rem;
-      }
-
-      .panel-card {
-        border-radius: 6px;
-      }
-
-      .filters-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .favorites-form .form-control {
-        min-width: 0;
-        width: 100%;
-      }
-
-      .favorites-controls {
-        width: 100%;
-      }
-    }
-  </style>
+  <title>Job feed</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="feed.css" />
 </head>
 <body>
-<div class="app-shell">
-  <section class="panel-card filters-panel">
-    <div class="d-flex flex-column flex-lg-row justify-content-between gap-2">
+<div class="app" id="app-root">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div>
+      <h1>Job feed</h1>
+      <div class="sub" id="header-sub">Loading…</div>
+    </div>
+    <div class="meta" id="header-meta"></div>
+  </header>
+
+  <!-- Filters -->
+  <section class="filters-panel">
+    <div class="filters-top">
       <div class="filters-heading">
-        <div class="section-label">Filters</div>
-        <h2 class="h4 m-0">Refine the job stream</h2>
-        <div id="result-count"></div>
+        <h2>Refine the job stream</h2>
+        <div class="result-count" id="result-count"></div>
       </div>
-      <div id="stats" class="align-self-lg-center text-lg-end">Loading…</div>
+      <div class="filters-stats" id="stats"></div>
     </div>
-
     <div class="filters-grid">
-      <div class="filter-title-field">
-        <div class="title-label-row mb-2">
-            <label for="filter-title" class="form-label mb-0">Job title</label>
-            <button
-              type="button"
-              class="hint-trigger"
-              data-bs-toggle="tooltip"
-              data-bs-placement="top"
-              title="Supports grouped matches and exclusions like `-(growth,marketing)`."
-              aria-label="Job title search syntax help"
-            >i</button>
-        </div>
-        <input id="filter-title" class="form-control" type="text" placeholder="product (owner,manager,builder)" autocomplete="off" />
+      <div class="filter-group">
+        <label class="filter-label" for="filter-title">Job title</label>
+        <input id="filter-title" class="filter-input" type="text" placeholder="product (owner,manager,builder)" autocomplete="off" />
       </div>
-      <div>
-        <label for="filter-location" class="form-label mb-2">Location</label>
-        <input id="filter-location" class="form-control" type="text" placeholder="Paris, Remote" autocomplete="off" />
+      <div class="filter-group">
+        <label class="filter-label" for="filter-location">Location</label>
+        <input id="filter-location" class="filter-input" type="text" placeholder="Paris, Remote" autocomplete="off" />
       </div>
-      <div>
-        <label for="filter-company" class="form-label mb-2">Company</label>
-        <input id="filter-company" class="form-control" type="text" placeholder="Apple, Google" autocomplete="off" />
+      <div class="filter-group">
+        <label class="filter-label" for="filter-company">Company</label>
+        <input id="filter-company" class="filter-input" type="text" placeholder="Apple, Google" autocomplete="off" />
       </div>
-      <div>
-        <label for="filter-sources" class="form-label mb-2">Providers</label>
-        <div class="dropdown">
-          <button
-            id="filter-sources"
-            class="btn dropdown-toggle form-control-like"
-            type="button"
-            data-bs-toggle="dropdown"
-            data-bs-auto-close="outside"
-            aria-expanded="false"
-          >All providers</button>
-          <div id="filter-sources-menu" class="dropdown-menu providers-menu"></div>
+      <div class="filter-group">
+        <label class="filter-label">Providers</label>
+        <div class="provider-dropdown" id="provider-dropdown">
+          <button type="button" class="provider-btn" id="provider-btn">All providers</button>
+          <div class="provider-menu" id="provider-menu"></div>
         </div>
       </div>
-      <div>
-        <label for="filter-days" class="form-label mb-2">Max age</label>
-        <input id="filter-days" class="form-control" type="number" min="1" placeholder="e.g. 7" />
+      <div class="filter-group">
+        <label class="filter-label" for="filter-days">Max age</label>
+        <input id="filter-days" class="filter-input" type="number" min="1" placeholder="7" />
       </div>
     </div>
   </section>
 
-  <section class="panel-card saved-strip">
-    <div class="d-flex flex-column gap-3">
-      <div class="d-flex flex-column flex-xl-row justify-content-between gap-3">
-        <div>
-          <div class="saved-searches-label mb-2">Saved search</div>
-          <div class="d-flex gap-2 flex-wrap">
-            <button class="search-btn btn btn-sm" id="saved-miami-product" type="button">Product Manager - South Florida</button>
-          </div>
-        </div>
-
-        <div>
-          <div class="saved-searches-label mb-2">Favorites</div>
-          <div class="favorites-toolbar">
-            <div class="favorites-controls">
-              <div class="favorites-only">
-                <input class="form-check-input" type="checkbox" role="switch" id="favorites-only-toggle" />
-                <label class="form-check-label" for="favorites-only-toggle">Favorites only</label>
-              </div>
-              <button
-                type="button"
-                class="btn btn-light favorites-manage-btn"
-                data-bs-toggle="modal"
-                data-bs-target="#favorites-modal"
-              >Manage favorites</button>
-            </div>
-          </div>
-        </div>
-      </div>
+  <!-- Saved searches + favorites strip -->
+  <div class="strip-panel">
+    <div class="strip-left" id="saved-searches-strip">
+      <span class="strip-label">Saved</span>
     </div>
-  </section>
-
-  <section class="table-panel">
-    <div id="loading" class="text-center text-secondary">
-      <div class="spinner-border text-success" role="status" aria-hidden="true"></div>
-      <div class="mt-3">Loading jobs…</div>
+    <div class="strip-right">
+      <label class="fav-only-wrap">
+        <input type="checkbox" id="fav-only-toggle" />
+        Favorites only
+      </label>
+      <label class="fav-only-wrap">
+        <input type="checkbox" id="evaluated-only-toggle" />
+        Evaluated only
+      </label>
+      <button class="btn-manage" type="button" id="open-fav-modal">Manage favorites</button>
     </div>
+  </div>
 
-    <div id="empty" class="text-center text-secondary" style="display:none">
-      No jobs match your filters.
-    </div>
+  <!-- Job list -->
+  <div id="loading-state" class="loading-state">
+    <div class="spinner"></div>
+    <div>Loading jobs…</div>
+  </div>
 
-    <div id="jobs-table-wrap" class="table-responsive" style="display:none">
-      <table id="jobs-table" class="table table-hover align-middle">
-        <thead>
-          <tr>
-            <th></th>
-            <th>Title</th>
-            <th>Company</th>
-            <th>Location</th>
-            <th>Provider</th>
-            <th>Posted</th>
-          </tr>
-        </thead>
-        <tbody id="jobs-body"></tbody>
-      </table>
-    </div>
+  <div id="empty-state" class="empty-state" style="display:none">
+    <h3>No results</h3>
+    <p id="empty-msg">No jobs match your filters.</p>
+  </div>
 
-    <div class="d-flex justify-content-center align-items-center gap-2 p-3" id="pagination" style="display:none">
-      <button id="btn-prev" class="btn btn-outline-secondary btn-sm" type="button">Previous</button>
-      <span id="page-info"></span>
-      <button id="btn-next" class="btn btn-outline-secondary btn-sm" type="button">Next</button>
-    </div>
-  </section>
+  <div id="jobs-list" class="job-list" style="display:none"></div>
 
-  <footer class="viewer-footer">
-    <a href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a>
+  <div id="pagination" class="pagination-wrap" style="display:none">
+    <button id="btn-prev" class="btn" type="button">← Prev</button>
+    <span id="page-info" class="page-info"></span>
+    <button id="btn-next" class="btn" type="button">Next →</button>
+  </div>
+
+  <footer style="margin-top:24px; text-align:center; font-size:12px; color:var(--muted);">
+    <a href="https://logo.dev" target="_blank" rel="noopener" style="color:inherit;">Logos by Logo.dev</a>
   </footer>
 </div>
 
-<div class="modal fade" id="favorites-modal" tabindex="-1" aria-labelledby="favorites-modal-title" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2 class="modal-title fs-5" id="favorites-modal-title">Favorite companies</h2>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <form id="favorite-company-form" class="favorites-form mb-3">
-          <input
-            id="favorite-company-input"
-            class="form-control"
-            type="text"
-            placeholder="Add favorite company"
-            autocomplete="off"
-          />
-          <button class="btn btn-light" type="submit">Add</button>
-        </form>
+<!-- Side panel overlay -->
+<div class="panel-overlay" id="panel-overlay"></div>
+<div class="side-panel" id="side-panel" role="dialog" aria-modal="true" aria-label="Fit analysis">
+  <header class="panel-header">
+    <div>
+      <div class="p-label">Fit analysis</div>
+      <h2 id="panel-title"></h2>
+      <div class="pcompany" id="panel-company"></div>
+    </div>
+    <button class="panel-close" id="panel-close">✕</button>
+  </header>
+  <div class="panel-body" id="panel-body"></div>
+  <footer class="panel-footer" id="panel-footer"></footer>
+</div>
 
-        <div id="favorite-company-strip" style="display:none">
-          <div class="saved-searches-label mb-2">Favorite companies</div>
-          <div id="favorite-company-chips" class="favorite-chips"></div>
-        </div>
+<!-- Notification stack -->
+<div id="notif-stack" class="notif-stack"></div>
+
+<!-- JD data modal -->
+<div class="modal-overlay" id="jd-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="jd-modal-title">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="jd-modal-title">Extracted JD data</h3>
+      <button class="modal-close" id="jd-modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="jd-modal-body" style="max-height:65vh;overflow-y:auto;">
+      <div class="jd-loading">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Favorites modal -->
+<div class="modal-overlay" id="fav-modal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Favorite companies</h3>
+      <button class="modal-close" id="close-fav-modal">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="fav-add-row">
+        <input id="fav-input" type="text" placeholder="Add favorite company" autocomplete="off" />
+        <button class="btn" id="fav-add-btn" type="button">Add</button>
+      </div>
+      <div id="fav-chips-wrap" style="display:none">
+        <div class="strip-label" style="margin-bottom:8px;">Saved companies</div>
+        <div class="fav-chips" id="fav-chips"></div>
       </div>
     </div>
   </div>
 </div>
 
-<script
-  src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-  integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
-  crossorigin="anonymous"
-></script>
-<script>
-  let currentPage = 1;
-  let totalJobs = 0;
-  let pageSize = 50;
-  let debounceTimer = null;
-  let logoDevPublishableKey = null;
-  let hasLogoDevBrandSearch = false;
-  const logoDevBrandDomains = new Map();
-  const logoDevBrandLookupsInFlight = new Set();
-
-  const titleInput = document.getElementById('filter-title');
-  const locationInput = document.getElementById('filter-location');
-  const companyInput = document.getElementById('filter-company');
-  const sourcesButton = document.getElementById('filter-sources');
-  const sourcesMenu = document.getElementById('filter-sources-menu');
-  const daysInput = document.getElementById('filter-days');
-  const favoritesOnlyToggle = document.getElementById('favorites-only-toggle');
-  const favoriteCompanyForm = document.getElementById('favorite-company-form');
-  const favoriteCompanyInput = document.getElementById('favorite-company-input');
-  const favoriteCompanyStrip = document.getElementById('favorite-company-strip');
-  const favoriteCompanyChips = document.getElementById('favorite-company-chips');
-  const tbody = document.getElementById('jobs-body');
-  const tableWrap = document.getElementById('jobs-table-wrap');
-  const empty = document.getElementById('empty');
-  const loading = document.getElementById('loading');
-  const resultCount = document.getElementById('result-count');
-  const pagination = document.getElementById('pagination');
-  const pageInfo = document.getElementById('page-info');
-  const btnPrev = document.getElementById('btn-prev');
-  const btnNext = document.getElementById('btn-next');
-
-  const SAVED_SEARCHES = {
-    'saved-miami-product': {
-      title: 'product (manager,owner,builder) -(associate,growth,marketing,salesforce)',
-      location: 'remote',
-      company: '',
-      sources: [],
-      days: '1'
-    }
-  };
-
-  const HIDDEN_KEY = 'job-viewer:hidden';
-  const VISITED_KEY = 'job-viewer:visited';
-  const FAVORITE_COMPANIES_KEY = 'job-viewer:favorite-companies';
-  const DEFAULT_EMPTY_MESSAGE = 'No jobs match your filters.';
-  const FAVORITES_ONLY_EMPTY_MESSAGE = 'No jobs match your filters. Add favorite companies to use Favorites only.';
-  let allJobs = [];
-
-  function loadHidden() {
-    try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]')); }
-    catch { return new Set(); }
-  }
-
-  function saveHidden(set) {
-    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...set]));
-  }
-
-  function loadVisited() {
-    try { return new Set(JSON.parse(localStorage.getItem(VISITED_KEY) || '[]')); }
-    catch { return new Set(); }
-  }
-
-  function saveVisited(set) {
-    localStorage.setItem(VISITED_KEY, JSON.stringify([...set].slice(-500)));
-  }
-
-  function normalizeCompany(value) {
-    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
-  }
-
-  function loadFavoriteCompanies() {
-    const companies = new Map();
-    try {
-      const raw = JSON.parse(localStorage.getItem(FAVORITE_COMPANIES_KEY) || '[]');
-      if (!Array.isArray(raw)) return companies;
-      for (const item of raw) {
-        const label = String(item || '').trim().replace(/\s+/g, ' ');
-        const key = normalizeCompany(label);
-        if (!key || companies.has(key)) continue;
-        companies.set(key, label);
-      }
-    } catch {}
-    return companies;
-  }
-
-  function saveFavoriteCompanies(map) {
-    localStorage.setItem(FAVORITE_COMPANIES_KEY, JSON.stringify([...map.values()]));
-  }
-
-  let hiddenJobs = loadHidden();
-  let visitedJobs = loadVisited();
-  let favoriteCompanies = loadFavoriteCompanies();
-
-  function jobKey(job) {
-    return `${job.provider}|${job.source_key}|${job.job_id}`;
-  }
-
-  function companyName(job) {
-    if (job.provider === 'workday') return job.source_key.split('/')[0];
-    return job.source_key;
-  }
-
-  function ageBadge(dateStr) {
-    if (!dateStr) return '<span class="badge age-badge text-bg-secondary">unknown</span>';
-    const dt = new Date(dateStr);
-    const diffMs = Date.now() - dt.getTime();
-    const days = Math.floor(diffMs / 86400000);
-    const label = days === 0 ? 'today' : days === 1 ? '1d ago' : `${days}d ago`;
-    const cls = days <= 3 ? 'text-bg-success' : days <= 14 ? 'text-bg-warning' : 'text-bg-danger';
-    const tooltip = dt.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
-    return `<span class="badge age-badge ${cls}" data-bs-toggle="tooltip" data-bs-placement="top" title="${esc(tooltip)}">${label}</span>`;
-  }
-
-  function markVisited(key) {
-    visitedJobs.delete(key);
-    visitedJobs.add(key);
-    saveVisited(visitedJobs);
-  }
-
-  function applyVisitedState(row, key) {
-    row.classList.toggle('visited-row', visitedJobs.has(key));
-  }
-
-  function favoriteCompanyKey(value) {
-    return normalizeCompany(value);
-  }
-
-  function isFavoriteCompany(value) {
-    return favoriteCompanies.has(favoriteCompanyKey(value));
-  }
-
-  function favoriteCompanyLabel(value) {
-    const key = favoriteCompanyKey(value);
-    return favoriteCompanies.get(key) ?? String(value || '').trim().replace(/\s+/g, ' ');
-  }
-
-  function addFavoriteCompany(value) {
-    const label = String(value || '').trim().replace(/\s+/g, ' ');
-    const key = favoriteCompanyKey(label);
-    if (!key || favoriteCompanies.has(key)) return false;
-    favoriteCompanies.set(key, label);
-    saveFavoriteCompanies(favoriteCompanies);
-    return true;
-  }
-
-  function removeFavoriteCompany(value) {
-    const key = favoriteCompanyKey(value);
-    if (!favoriteCompanies.has(key)) return false;
-    favoriteCompanies.delete(key);
-    saveFavoriteCompanies(favoriteCompanies);
-    return true;
-  }
-
-  function toggleFavoriteCompany(value) {
-    if (isFavoriteCompany(value)) {
-      removeFavoriteCompany(value);
-      return false;
-    }
-    addFavoriteCompany(value);
-    return true;
-  }
-
-  function getFavoriteCompanyEntries() {
-    return [...favoriteCompanies.entries()]
-      .map(([key, label]) => ({ key, label }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }
-
-  function favoriteOnlyActive() {
-    return favoritesOnlyToggle.checked;
-  }
-
-  function hasLogoSupport() {
-    return typeof logoDevPublishableKey === 'string' && logoDevPublishableKey.length > 0;
-  }
-
-  function logoUrlForDomain(domain) {
-    if (!hasLogoSupport()) return null;
-    const value = encodeURIComponent(String(domain || '').trim());
-    const token = encodeURIComponent(logoDevPublishableKey);
-    if (!value) return null;
-    return `https://img.logo.dev/${value}?token=${token}&size=32&format=png&fallback=404`;
-  }
-
-  function logoUrlForCompany(company) {
-    if (!hasLogoSupport()) return null;
-    const cachedDomain = logoDevBrandDomains.get(favoriteCompanyKey(company));
-    if (cachedDomain) return logoUrlForDomain(cachedDomain);
-    const name = encodeURIComponent(String(company || '').trim());
-    const token = encodeURIComponent(logoDevPublishableKey);
-    if (!name) return null;
-    return `https://img.logo.dev/name/${name}?token=${token}&size=32&format=png&fallback=404`;
-  }
-
-  function companyLogoFallback(company) {
-    const label = String(company || '').trim();
-    return esc(label.charAt(0) || '?');
-  }
-
-  function companyWebsiteFor(company) {
-    const cachedDomain = logoDevBrandDomains.get(favoriteCompanyKey(company));
-    return cachedDomain ? `https://${cachedDomain}` : null;
-  }
-
-  function ensureBrandDomain(company) {
-    if (!hasLogoDevBrandSearch) return;
-    const key = favoriteCompanyKey(company);
-    if (!key || logoDevBrandDomains.has(key) || logoDevBrandLookupsInFlight.has(key)) return;
-    logoDevBrandLookupsInFlight.add(key);
-    fetch(`/api/logo-dev/brand?company=${encodeURIComponent(company)}`)
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
-        const domain = typeof data?.domain === 'string' && data.domain.trim() ? data.domain.trim() : null;
-        logoDevBrandDomains.set(key, domain);
-      })
-      .catch(() => {
-        logoDevBrandDomains.set(key, null);
-      })
-      .finally(() => {
-        logoDevBrandLookupsInFlight.delete(key);
-        renderCurrentView();
-      });
-  }
-
-  function displayLocation(value) {
-    const full = String(value || '—');
-    const trimmed = full.trim() || '—';
-    const short = trimmed.length > 40 ? `${trimmed.slice(0, 37)}...` : trimmed;
-    return `<span class="location-text" title="${esc(trimmed)}">${esc(short)}</span>`;
-  }
-
-  function getRenderableJobs() {
-    return allJobs.filter((job) => {
-      if (favoriteOnlyActive() && !isFavoriteCompany(companyName(job))) return false;
-      if (hiddenJobs.has(jobKey(job))) return false;
-      return true;
-    });
-  }
-
-  function updateResultCount(visibleCount) {
-    if (favoriteOnlyActive()) {
-      resultCount.textContent = `${visibleCount.toLocaleString()} favorite job${visibleCount !== 1 ? 's' : ''} on this page`;
-      return;
-    }
-    resultCount.textContent = `${visibleCount.toLocaleString()} job${visibleCount !== 1 ? 's' : ''}`;
-  }
-
-  function renderFavoriteChips() {
-    const entries = getFavoriteCompanyEntries();
-    favoriteCompanyChips.innerHTML = '';
-    favoriteCompanyStrip.style.display = entries.length > 0 ? 'block' : 'none';
-    for (const entry of entries) {
-      const chip = document.createElement('span');
-      chip.className = 'favorite-chip';
-      chip.innerHTML = `
-        <span>${esc(entry.label)}</span>
-        <button class="favorite-chip-remove" type="button" aria-label="Remove ${esc(entry.label)}">×</button>
-      `;
-      chip.querySelector('.favorite-chip-remove').addEventListener('click', () => {
-        removeFavoriteCompany(entry.key);
-        renderFavoriteChips();
-        renderCurrentView();
-      });
-      favoriteCompanyChips.appendChild(chip);
-    }
-  }
-
-  function getSelectedProviders() {
-    return Array.from(sourcesMenu.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value);
-  }
-
-  function syncProvidersLabel() {
-    const selected = getSelectedProviders();
-    if (selected.length === 0) {
-      sourcesButton.textContent = 'All providers';
-      return;
-    }
-    if (selected.length <= 2) {
-      sourcesButton.textContent = selected.join(', ');
-      return;
-    }
-    sourcesButton.textContent = `${selected.length} providers`;
-  }
-
-  function setSelectedProviders(values) {
-    const wanted = new Set(values || []);
-    sourcesMenu.querySelectorAll('input[type="checkbox"]').forEach((input) => {
-      input.checked = wanted.has(input.value);
-    });
-    syncProvidersLabel();
-  }
-
-  function initTooltips(root = document) {
-    if (!window.bootstrap?.Tooltip) return;
-    root.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((element) => {
-      bootstrap.Tooltip.getOrCreateInstance(element, {
-        container: 'body',
-        trigger: 'hover focus'
-      });
-    });
-  }
-
-  function renderJobs(jobs) {
-    tbody.innerHTML = '';
-    for (const job of jobs) {
-      const key = jobKey(job);
-      const company = companyName(job);
-      const isFavorite = isFavoriteCompany(company);
-      ensureBrandDomain(company);
-      const titleCell = job.job_url
-        ? `<a class="job-link" href="${job.job_url}" target="_blank" rel="noopener">${esc(job.title ?? '—')}</a><span class="visited-flag">Viewed</span>`
-        : esc(job.title ?? '—');
-      const logoUrl = logoUrlForCompany(company);
-      const companyWebsite = companyWebsiteFor(company);
-      const companyInner = `
-        ${logoUrl
-          ? `<span class="company-logo-frame" data-logo-fallback="${companyLogoFallback(company)}"><img class="company-logo" src="${logoUrl}" alt="" loading="lazy" referrerpolicy="no-referrer"></span>`
-          : ''}
-        <div class="company-name-wrap">${esc(company)}</div>
-      `;
-      const companyCell = `
-        <div class="company-cell">
-          ${companyWebsite
-            ? `<a class="company-link" href="${esc(companyWebsite)}" target="_blank" rel="noopener">${companyInner}</a>`
-            : companyInner}
-        </div>
-      `;
-      const row = document.createElement('tr');
-      row.dataset.key = key;
-      row.dataset.company = favoriteCompanyKey(company);
-      row.innerHTML = `
-        <td class="hide-cell">
-          <div class="row-actions">
-            <button class="favorite-btn ${isFavorite ? 'is-favorite' : ''}" type="button" title="${isFavorite ? 'Remove company from favorites' : 'Add company to favorites'}" aria-label="${isFavorite ? 'Remove company from favorites' : 'Add company to favorites'}">★</button>
-            <button class="hide-btn" title="Hide this job">✕</button>
-          </div>
-        </td>
-        <td class="job-title">${titleCell}</td>
-        <td>${companyCell}</td>
-        <td>${displayLocation(job.location)}</td>
-        <td><span class="badge provider-badge">${esc(job.provider)}</span></td>
-        <td>${ageBadge(job.first_seen_at)}</td>
-      `;
-      applyVisitedState(row, key);
-      row.classList.toggle('favorite-row', isFavorite);
-      row.querySelector('.job-link')?.addEventListener('click', () => {
-        markVisited(key);
-        applyVisitedState(row, key);
-      });
-      row.querySelector('.company-logo')?.addEventListener('error', (event) => {
-        const frame = event.target.closest('.company-logo-frame');
-        if (!frame) return;
-        frame.textContent = frame.dataset.logoFallback || '?';
-      });
-      row.querySelector('.favorite-btn').addEventListener('click', () => {
-        toggleFavoriteCompany(company);
-        renderFavoriteChips();
-        renderCurrentView();
-      });
-      row.querySelector('.hide-btn').addEventListener('click', () => {
-        hiddenJobs.add(key);
-        saveHidden(hiddenJobs);
-        renderCurrentView();
-      });
-      tbody.appendChild(row);
-    }
-    initTooltips(tbody);
-  }
-
-  function renderCurrentView() {
-    if (loading.style.display !== 'none' && allJobs.length === 0) return;
-    const visibleJobs = getRenderableJobs();
-    tableWrap.style.display = 'none';
-    empty.style.display = 'none';
-
-    updateResultCount(visibleJobs.length);
-
-    if (visibleJobs.length === 0) {
-      empty.textContent = favoriteOnlyActive() && favoriteCompanies.size === 0
-        ? FAVORITES_ONLY_EMPTY_MESSAGE
-        : DEFAULT_EMPTY_MESSAGE;
-      empty.style.display = 'block';
-      return;
-    }
-
-    renderJobs(visibleJobs);
-    tableWrap.style.display = 'block';
-  }
-
-  function esc(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  async function fetchJobs(page = 1) {
-    const params = new URLSearchParams();
-    if (titleInput.value.trim()) params.set('title', titleInput.value.trim());
-    if (locationInput.value.trim()) params.set('location', locationInput.value.trim());
-    if (companyInput.value.trim()) params.set('company', companyInput.value.trim());
-    const selectedSources = getSelectedProviders();
-    if (selectedSources.length > 0) params.set('sources', selectedSources.join(','));
-    if (daysInput.value.trim()) params.set('days', daysInput.value.trim());
-    params.set('page', String(page));
-
-    loading.style.display = 'block';
-    tableWrap.style.display = 'none';
-    empty.style.display = 'none';
-    pagination.style.display = 'none';
-
-    try {
-      const res = await fetch(`/api/jobs?${params}`);
-      const data = await res.json();
-
-      totalJobs = data.total;
-      pageSize = data.pageSize;
-      currentPage = data.page;
-      allJobs = data.jobs;
-
-      loading.style.display = 'none';
-      renderCurrentView();
-
-      const totalPages = Math.ceil(totalJobs / pageSize);
-      if (totalPages > 1) {
-        pageInfo.textContent = `Page ${currentPage} / ${totalPages}`;
-        btnPrev.disabled = currentPage <= 1;
-        btnNext.disabled = currentPage >= totalPages;
-        pagination.style.display = 'flex';
-      }
-    } catch (e) {
-      loading.textContent = 'Error loading jobs.';
-    }
-  }
-
-  async function fetchStats() {
-    try {
-      const res = await fetch('/api/stats');
-      const data = await res.json();
-      const crawlDate = data.lastCrawl
-        ? new Date(data.lastCrawl).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
-        : 'unknown';
-      document.getElementById('stats').innerHTML =
-        `${data.total.toLocaleString()} jobs across ${data.byProvider.length} providers<br>Last crawl: ${crawlDate}`;
-    } catch {}
-  }
-
-  async function fetchConfig() {
-    try {
-      const res = await fetch('/api/config');
-      const data = await res.json();
-      logoDevPublishableKey = typeof data.logoDevPublishableKey === 'string' && data.logoDevPublishableKey.trim()
-        ? data.logoDevPublishableKey.trim()
-        : null;
-      hasLogoDevBrandSearch = Boolean(data.hasLogoDevBrandSearch);
-      renderCurrentView();
-    } catch {}
-  }
-
-  function onFilterChange() {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => fetchJobs(1), 250);
-  }
-
-  titleInput.addEventListener('input', onFilterChange);
-  locationInput.addEventListener('input', onFilterChange);
-  companyInput.addEventListener('input', onFilterChange);
-  daysInput.addEventListener('input', onFilterChange);
-  favoritesOnlyToggle.addEventListener('change', () => {
-    renderCurrentView();
-  });
-  sourcesMenu.addEventListener('change', (event) => {
-    if (!(event.target instanceof HTMLInputElement)) return;
-    syncProvidersLabel();
-    onFilterChange();
-  });
-
-  favoriteCompanyForm.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const added = addFavoriteCompany(favoriteCompanyInput.value);
-    favoriteCompanyInput.value = '';
-    if (!added) return;
-    renderFavoriteChips();
-    renderCurrentView();
-  });
-
-  btnPrev.addEventListener('click', () => fetchJobs(currentPage - 1));
-  btnNext.addEventListener('click', () => fetchJobs(currentPage + 1));
-
-  window.addEventListener('focus', () => {
-    visitedJobs = loadVisited();
-    favoriteCompanies = loadFavoriteCompanies();
-    renderFavoriteChips();
-    renderCurrentView();
-  });
-
-  window.addEventListener('pageshow', () => {
-    visitedJobs = loadVisited();
-    favoriteCompanies = loadFavoriteCompanies();
-    renderFavoriteChips();
-    renderCurrentView();
-  });
-
-  async function loadSources() {
-    try {
-      const res = await fetch('/api/sources');
-      const data = await res.json();
-      sourcesMenu.innerHTML = '';
-      for (const source of data.sources) {
-        const item = document.createElement('label');
-        item.className = 'dropdown-item';
-        item.innerHTML = `
-          <span class="form-check m-0 d-flex align-items-start gap-2">
-            <input class="form-check-input" type="checkbox" value="${esc(source)}">
-            <span class="form-check-label">${esc(source)}</span>
-          </span>
-        `;
-        sourcesMenu.appendChild(item);
-      }
-      syncProvidersLabel();
-    } catch (err) {
-      console.error('Failed to load sources:', err);
-    }
-  }
-
-  document.querySelectorAll('.search-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const search = SAVED_SEARCHES[btn.id];
-      if (!search) return;
-      titleInput.value = search.title;
-      locationInput.value = search.location;
-      companyInput.value = search.company;
-      setSelectedProviders(search.sources || []);
-      daysInput.value = search.days;
-      document.querySelectorAll('.search-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      fetchJobs(1);
-    });
-  });
-
-  loadSources();
-  renderFavoriteChips();
-  fetchConfig();
-  fetchStats();
-  fetchJobs(1);
-  initTooltips();
-</script>
+<script src="feed.js"></script>
 </body>
 </html>

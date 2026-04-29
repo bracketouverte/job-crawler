@@ -8,7 +8,7 @@ It has three main modules:
 
 - `crawler/` collects public job postings from providers like Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, and Workable.
 - `matcher/` extracts structured job-post data from a posting URL and runs fit analysis against a profile.
-- `viewer/` serves a lightweight UI over the crawler catalog so jobs can be searched and reviewed locally.
+- `viewer/` serves a local job-feed UI over the crawler catalog, with favorites, saved searches, JD inspection, and matcher-backed fit analysis.
 
 The profile files under `matcher/$CAREER_OPS_DIR/` are generated local assets from `career-ops`:
 https://github.com/santifer/career-ops
@@ -19,7 +19,7 @@ https://github.com/santifer/career-ops
 - Persist jobs in SQLite and export the latest snapshot as JSONL.
 - Parse a single posting URL into structured fields such as title, location, employment type, workplace type, requirements, and responsibilities.
 - Run both quick-fit and full-fit job scoring with NVIDIA NIM.
-- Browse the local catalog from a simple web UI.
+- Browse the local catalog from a local job-feed UI with saved searches, favorites, and fit-analysis workflows.
 - Run the whole stack with Docker Compose.
 
 ## Quick Start
@@ -111,6 +111,8 @@ docker compose up viewer
 ```
 
 Open `http://localhost:3000`.
+
+The viewer can trigger quick-fit and full-fit analysis runs directly from the UI, inspect parsed JD data for a job, and reuse saved searches from `viewer/public/saved-searches.json`.
 
 ### 6. Run the crawler on a schedule
 
