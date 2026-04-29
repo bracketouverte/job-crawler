@@ -1,13 +1,6 @@
-# Crawler
+# Job Scrapper Crawler
 
-The `crawler` module collects public ATS job boards into a normalized local catalog.
-Supported providers include Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, and Workable.
-
-It writes:
-
-- SQLite state in `crawler/state/catalog.sqlite`
-- current job snapshot in `crawler/output/current-jobs.jsonl`
-- crawl report in `crawler/output/report.json`
+Standalone Dockerized crawler for public ATS job boards.
 
 ## Quick Start
 
@@ -16,9 +9,10 @@ Run with catalog persistence (SQLite + JSONL output):
 ```bash
 docker compose run --rm crawler \
   --concurrency 8 \
-  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6 \
+  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2 \
   --timeout-ms 30000 \
   --retries 5 \
+  --exclude-sources /app/state/exclude.jsonl \
   --catalog-db /app/state/catalog.sqlite \
   --catalog-file /app/output/current-jobs.jsonl
 ```
@@ -66,12 +60,15 @@ Best for stability. Use when hitting rate limits or 403/429 errors.
 ```bash
 docker compose run --rm crawler \
   --concurrency 8 \
-  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6 \
+  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2 \
   --timeout-ms 30000 \
   --retries 5 \
+  --exclude-sources /app/state/exclude.jsonl \
   --catalog-db /app/state/catalog.sqlite \
   --catalog-file /app/output/current-jobs.jsonl
 ```
+
+To skip known-broken sources (404s/410s), add `--exclude-sources /app/state/exclude.jsonl`. The post-crawl hook automatically updates this file with new failures after each run.
 
 ### Balanced Mode
 
@@ -123,4 +120,14 @@ docker compose run --rm crawler \
 
 The exclusion file is a JSONL of sources that returned 404 or permanent errors in previous runs.
 This prevents re-crawling known-broken sources.
-Maintain manually in `crawler/state/exclude.jsonl`.
+When the crawler runs through the Docker entrypoint, the post-crawl hook automatically appends new `404`/`410` failures to `crawler/state/exclude.jsonl` after a successful run.
+
+## Scheduler Service
+
+From the repo root:
+
+```bash
+docker compose up -d scheduler
+```
+
+The scheduler service runs the crawler during the configured daytime window and skips runs that would happen too close together. It writes its last-run state under `crawler/state/` and uses the same crawler defaults as the compose-managed crawler service.

@@ -39,9 +39,10 @@ Run with catalog persistence (SQLite + JSONL output):
 ```bash
 docker compose run --rm crawler \
   --concurrency 8 \
-  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6 \
+  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2 \
   --timeout-ms 30000 \
   --retries 5 \
+  --exclude-sources /app/state/exclude.jsonl \
   --catalog-db /app/state/catalog.sqlite \
   --catalog-file /app/output/current-jobs.jsonl
 ```
@@ -51,6 +52,8 @@ Outputs:
 - SQLite catalog: `crawler/state/catalog.sqlite`
 - Jobs JSONL: `crawler/output/current-jobs.jsonl`
 - Report: `crawler/output/report.json`
+
+`exclude.jsonl` is updated automatically after a successful crawl run. Sources that return permanent `404`/`410` failures are appended to the quarantine file and skipped on later runs.
 
 Complete parameter list:
 
@@ -97,6 +100,14 @@ docker compose up viewer
 ```
 
 Open `http://localhost:3000`.
+
+### 6. Run the crawler on a schedule
+
+```bash
+docker compose up -d scheduler
+```
+
+The `scheduler` service runs the crawler on a daytime schedule and avoids rerunning if the most recent run was too recent. It uses the same crawler defaults shown above, including automatic exclusion-file updates.
 
 ## Tech Stack
 
