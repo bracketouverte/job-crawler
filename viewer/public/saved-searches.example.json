@@ -1,0 +1,20 @@
+[
+  {
+    "id": "prom-queen-soflo",
+    "label": "Prom Queen, SoFlo",
+    "title": "The Prom Queen!",
+    "location": "Miami",
+    "company": "",
+    "sources": [],
+    "days": "1"
+  },
+  {
+    "id": "prom-queen-NY",
+    "label": "Prom Queen, NY",
+    "title": "The Prom Queen!",
+    "location": "remote",
+    "company": "",
+    "sources": [],
+    "days": "1"
+  }
+]

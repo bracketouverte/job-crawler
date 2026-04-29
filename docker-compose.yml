@@ -18,7 +18,7 @@ services:
     environment:
       CAREER_OPS_DIR: ${CAREER_OPS_DIR:-career-ops}
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
-      NVIDIA_MODEL: ${NVIDIA_MODEL:-meta/llama-3.1-70b-instruct}
+      NVIDIA_MODEL: ${NVIDIA_MODEL:-meta/llama-4-maverick-17b-128e-instruct}
     volumes:
       - ./matcher:/app
     restart: "no"

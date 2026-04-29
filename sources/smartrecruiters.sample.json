@@ -1,0 +1,9 @@
+{
+  "provider": "SmartRecruiters",
+  "url_template": "https://api.smartrecruiters.com/v1/companies/{identifier}/postings/",
+  "companies": [
+    {
+      "identifier": "example-company"
+    }
+  ]
+}
