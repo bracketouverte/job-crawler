@@ -44,6 +44,17 @@ services:
       NVIDIA_MODEL: ${NVIDIA_MODEL:-meta/llama-4-maverick-17b-128e-instruct}
     restart: unless-stopped
 
+  scheduler:
+    build:
+      context: ./scheduler
+    environment:
+      - PROJECT_DIR=${PWD}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/project:ro
+      - ./crawler/state:/state
+    restart: unless-stopped
+
   crawler:
     build:
       context: ./crawler
@@ -52,6 +63,16 @@ services:
       - ./crawler/output:/app/output
       - ./crawler/state:/app/state
     command:
+      - --concurrency
+      - "8"
+      - --provider-concurrency
+      - ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2
+      - --timeout-ms
+      - "30000"
+      - --retries
+      - "5"
+      - --exclude-sources
+      - /app/state/exclude.jsonl
       - --catalog-db
       - /app/state/catalog.sqlite
       - --catalog-file
