@@ -6,7 +6,7 @@ import { normalizeGreenhouseJob } from "./greenhouse.js";
 import { normalizeLeverJob } from "./lever.js";
 import { normalizeTeamtailorJob } from "./teamtailor.js";
 import { normalizeWorkableJob } from "./workable.js";
-import { normalizeWorkdayJob } from "./workday.js";
+import { normalizeWorkdayJob, parseWorkdayPostedAt } from "./workday.js";
 
 const fetchedAt = "2026-04-15T00:00:00.000Z";
 
@@ -103,6 +103,12 @@ test("normalizes Workday jobs", () => {
 
   assert.equal(job.job_id, "R1");
   assert.equal(job.job_url, "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Analyst_R1");
+});
+
+test("normalizes Workday relative posted dates", () => {
+  assert.equal(parseWorkdayPostedAt("Posted Today", fetchedAt), "2026-04-15T00:00:00.000Z");
+  assert.equal(parseWorkdayPostedAt("Posted Yesterday", fetchedAt), "2026-04-14T00:00:00.000Z");
+  assert.equal(parseWorkdayPostedAt("Posted 30+ Days Ago", fetchedAt), "2026-03-16T00:00:00.000Z");
 });
 
 test("normalizes Workable jobs", () => {

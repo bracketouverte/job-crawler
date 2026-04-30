@@ -76,6 +76,8 @@ export function normalizeWorkdayJob(
     jobUrl = `https://${source.tenant}.${source.shard}.myworkdayjobs.com/en-US/${source.site}/job/${jobPath}`;
   }
   
+  const postedOn = firstString(job.postedOn);
+
   return {
     provider: "workday",
     source_key: sourceKey,
@@ -83,14 +85,59 @@ export function normalizeWorkdayJob(
     title: firstString(job.title),
     location: firstString(job.locationsText),
     employment_type: firstString(job.timeType, inferBullet(job.bulletFields, "time")),
-    compensation: inferBullet(job.bulletFields, "pay"),
+    compensation: inferCompensation(job.bulletFields),
     department: firstString(job.jobFamily),
     office: null,
     language: null,
-    updated_at: firstString(job.postedOn),
+    updated_at: postedOn,
+    posted_at: parseWorkdayPostedAt(postedOn, fetchedAt),
     job_url: jobUrl,
     fetched_at: fetchedAt
   };
+}
+
+export function parseWorkdayPostedAt(value: string | null, fetchedAt: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  const text = value.trim();
+  if (!text) {
+    return null;
+  }
+
+  const fetchedMs = Date.parse(fetchedAt);
+  if (Number.isNaN(fetchedMs)) {
+    return null;
+  }
+  const fetchedDate = new Date(fetchedMs);
+  const exactMs = Date.parse(text);
+  if (!Number.isNaN(exactMs)) {
+    return new Date(exactMs).toISOString();
+  }
+  if (/\btoday\b/i.test(text)) {
+    return startOfUtcDay(fetchedDate).toISOString();
+  }
+  if (/\byesterday\b/i.test(text)) {
+    return addUtcDays(startOfUtcDay(fetchedDate), -1).toISOString();
+  }
+
+  const relative = text.match(/posted\s+(\d+)\+?\s+(day|week|month|year)s?\s+ago/i);
+  if (relative?.[1] && relative[2]) {
+    const amount = Number(relative[1]);
+    const unit = relative[2].toLowerCase();
+    const days = unit === "year" ? amount * 365 : unit === "month" ? amount * 30 : unit === "week" ? amount * 7 : amount;
+    return addUtcDays(startOfUtcDay(fetchedDate), -days).toISOString();
+  }
+
+  return null;
+}
+
+function startOfUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * 86400000);
 }
 
 function inferBullet(values: unknown, keyword: string): string | null {
@@ -103,4 +150,18 @@ function inferBullet(values: unknown, keyword: string): string | null {
     .find((value) => value?.toLowerCase().includes(keyword));
 
   return exact ?? joinStrings(values.map((value) => compactObjectStrings(value)));
+}
+
+function inferCompensation(values: unknown): string | null {
+  const value = inferBullet(values, "pay");
+  if (value === null) {
+    return null;
+  }
+  if (/^(req|r|jr|job)[-_]?\d+[a-z0-9-]*$/i.test(value)) {
+    return null;
+  }
+  if (!/(salary|compensation|base pay|pay range|ote|equity|bonus|hour|annual|year|yr|[$€£]|\b\d{2,3}\s?k\b|\b\d{2,3}[,\s]\d{3}\b)/i.test(value)) {
+    return null;
+  }
+  return value;
 }
