@@ -2,6 +2,8 @@
 set -e
 
 RUNS_FILE="/state/scheduler-runs.json"
+echo "[SCHEDULER] Local time: $(date)"
+echo "[SCHEDULER] UTC time: $(date -u)"
 
 record_run() {
   now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
