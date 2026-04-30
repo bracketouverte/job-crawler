@@ -185,30 +185,33 @@
     'codex-ensemble':  { color: '#7f1d1d', label: 'Codex Full',    btnClass: 'btn-analyze--codex-ens',  spark: 'btn-spark--red',    dur: '~2min', swatchClass: 'menu-swatch--codex-ens' },
   };
 
-  function footerHtml(job, pipeline) {
-    const anal    = job.analysis;
-    const score   = Number(anal?.score_5 || 0);
-    const hasAnal = anal && score > 0;
+  function pipelineChipsHtml(job) {
+    const pipelines = job.pipelines || {};
+    const entries = Object.entries(pipelines);
+    if (entries.length === 0) return '';
+    const chips = entries.map(([tag, result]) => {
+      const p = PIPELINES[tag] || { color: '#6b7280', label: tag };
+      const score = Number(result.analysis?.score_5 || 0);
+      const scoreStr = score > 0 ? score.toFixed(1) : '—';
+      return `<button class="pipeline-chip js-open-panel-pipeline" data-pipeline="${esc(tag)}" title="${esc(p.label || tag)} · Score ${scoreStr}/5" style="color:${p.color};border-color:${p.color}44;background:${p.color}11;"><span class="pipeline-chip-dot" style="background:${p.color};"></span>${esc(p.label || tag)} ${esc(scoreStr)}</button>`;
+    });
+    return `<div class="pipeline-chips-row">${chips.join('')}</div>`;
+  }
 
-    const scoreBadge = (color) => hasAnal ? `
-      <button class="btn-score-badge js-open-panel" title="Open analysis details" style="background:${color}">
-        ${score.toFixed(1)}<span class="btn-score-badge-max">/5</span>
-      </button>` : '';
-
+  function footerHtml(job) {
     const btn = (mode, jsClass) => {
       const p = PIPELINES[mode];
-      const ran = hasAnal && pipeline === mode;
-      const label = ran ? `${p.label} — Re-run` : `${p.label} analyze`;
+      const label = `${p.label} analyze`;
       return `
       <div class="btn-analyze-wrap">
-        <button class="btn btn-analyze ${p.btnClass} ${jsClass}${ran ? ' ran' : ''}" data-has-anal="${hasAnal}" title="${p.label} analysis · ${p.dur}">
+        <button class="btn btn-analyze ${p.btnClass} ${jsClass}" title="${p.label} analysis · ${p.dur}">
           <span class="btn-spark ${p.spark}">✦</span> ${esc(label)}
         </button>
-        ${ran ? scoreBadge(p.color) : ''}
       </div>`;
     };
 
     return `
+      ${pipelineChipsHtml(job)}
       ${btn('maverick', 'js-analyze-quick')}
       ${btn('ensemble', 'js-analyze-full')}
       ${btn('claude',   'js-analyze-claude')}
@@ -222,7 +225,12 @@
   }
 
   function bindFooterEvents(footer, job) {
-    footer.querySelectorAll('.js-open-panel').forEach(el => el.addEventListener('click', () => openPanel(job, job.analysis)));
+    footer.querySelectorAll('.js-open-panel-pipeline').forEach(el => {
+      el.addEventListener('click', () => {
+        const tag = el.dataset.pipeline;
+        openPanel(job, tag);
+      });
+    });
     footer.querySelector('.js-analyze-quick')?.addEventListener('click',      () => analyzeJob(job, null, 'maverick'));
     footer.querySelector('.js-analyze-full')?.addEventListener('click',       () => analyzeJob(job, null, 'ensemble'));
     footer.querySelector('.js-analyze-claude')?.addEventListener('click',     () => analyzeJob(job, null, 'claude'));
@@ -333,7 +341,7 @@
 
       /* footer */
       const footerEl = card.querySelector('.job-footer');
-      footerEl.innerHTML = footerHtml(job, anal?.pipeline);
+      footerEl.innerHTML = footerHtml(job);
       bindFooterEvents(footerEl, job);
 
       /* events */
@@ -470,29 +478,27 @@
   /* ── Analysis side panel ─────────────────────────────────────── */
   function scoreTier(s) { return s >= 4 ? 'high' : s >= 3 ? 'mid' : 'low'; }
 
-  function openPanel(job, analysis) {
-    if (!job || !analysis) return;
-    panelJobData = { job, analysis };
+  function renderPanelBody(job, activeTag) {
+    const pipelines = job.pipelines || {};
+    const pipelineTags = Object.keys(pipelines);
 
-    const pComp = companyName(job);
-    const pLogoUrl = logoUrl(pComp);
-    const pLogoHtml = pLogoUrl
-      ? `<span style="width:16px;height:16px;border-radius:4px;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;background:#f4f4f4;border:1px solid #e3e3e3;flex-shrink:0;"><img src="${esc(pLogoUrl)}" alt="" width="16" height="16" style="object-fit:contain;display:block;" referrerpolicy="no-referrer"></span>`
-      : `<span style="width:16px;height:16px;border-radius:4px;background:#f4f4f4;border:1px solid #e3e3e3;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#5b5b5b;flex-shrink:0;">${esc((pComp.charAt(0) || '?').toUpperCase())}</span>`;
-
-    const titleEl = document.getElementById('panel-title');
-    if (job.job_url) {
-      titleEl.innerHTML = `<a href="${esc(job.job_url)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-underline-offset:3px;">${esc(job.title ?? '—')} <span style="font-size:13px;opacity:0.5;">↗</span></a>`;
-    } else {
-      titleEl.textContent = job.title ?? '—';
+    // Resolve which tag to show: prefer given tag, else first available, else fall back to job.analysis
+    let tag = activeTag;
+    if (!tag || !pipelines[tag]) {
+      tag = pipelineTags[0] || null;
     }
-    document.getElementById('panel-company').innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;">${pLogoHtml}<span>${esc(pComp)} · ${esc(job.location || '—')}</span></span>`;
+
+    const analysis = tag ? (pipelines[tag]?.analysis || null) : (job.analysis || null);
+    if (!analysis) return;
+
+    // Update stored active tag
+    if (panelJobData) panelJobData.activeTag = tag;
 
     const score = Number(analysis.score_5 || 0);
     const tier  = scoreTier(score);
     const tierLabel = tier === 'high' ? 'Strong fit' : tier === 'mid' ? 'Partial fit' : 'Weak fit';
     const pct   = Math.round((score / 5) * 100);
-    const pipeline = analysis.pipeline || 'maverick';
+    const pipeline = tag || analysis.pipeline || 'maverick';
     const pipelineBadgeLabels = {
       maverick: 'Preview · Maverick',
       ensemble: 'Ensemble pipeline',
@@ -501,8 +507,6 @@
       codex: 'Codex Quick',
       'codex-ensemble': 'Codex Full',
     };
-    const pipelineCssClass = { maverick: 'pipeline-maverick', ensemble: 'pipeline-ensemble', claude: 'pipeline-claude', 'claude-ensemble': 'pipeline-claude-ensemble', codex: 'pipeline-codex', 'codex-ensemble': 'pipeline-codex-ensemble' }[pipeline] || 'pipeline-maverick';
-    const pipelineBadge = `<span class="pipeline-badge ${pipelineCssClass}">${esc(pipelineBadgeLabels[pipeline] || pipeline)}</span>`;
 
     const strengths = Array.isArray(analysis.requirement_match)
       ? analysis.requirement_match.slice(0, 4).map(m => `${m.requirement || '—'}: ${m.profile_evidence || '—'}`)
@@ -510,8 +514,18 @@
     const gaps = Array.isArray(analysis.gaps) ? analysis.gaps.slice(0, 4).map(g => g.gap || g) : [];
     const blockers = Array.isArray(analysis.blockers) ? analysis.blockers : [];
 
+    // Pipeline tabs (only if multiple pipelines)
+    const tabsHtml = pipelineTags.length > 1 ? `
+      <div class="pipeline-tabs">
+        ${pipelineTags.map(t => {
+          const p = PIPELINES[t] || { color: '#6b7280', label: t };
+          const isActive = t === tag;
+          return `<button class="pipeline-tab${isActive ? ' active' : ''}" data-tab-pipeline="${esc(t)}" style="${isActive ? `border-color:${p.color};color:${p.color};background:${p.color}11;` : ''}">${esc(p.label || t)}</button>`;
+        }).join('')}
+      </div>` : '';
+
     document.getElementById('panel-body').innerHTML = `
-      <div class="panel-pipeline">${pipelineBadge}</div>
+      ${tabsHtml}
       <section class="score-block">
         <div class="score-readout">
           <span class="score-num mono">${score.toFixed(1)}</span>
@@ -522,7 +536,7 @@
       </section>
       <div class="panel-actions">
         <div class="panel-rerun-wrap">
-          <button class="btn btn-ghost" id="panel-reanalyze" data-mode="${pipeline}">Re-run · ${esc(pipelineBadgeLabels[pipeline] || pipeline)}</button>
+          <button class="btn btn-ghost" id="panel-reanalyze" data-mode="${esc(pipeline)}">Re-run · ${esc(pipelineBadgeLabels[pipeline] || pipeline)}</button>
           <button class="panel-rerun-caret" id="panel-rerun-caret" title="Choose pipeline">▾</button>
           <div class="panel-rerun-menu" id="panel-rerun-menu">
             ${Object.entries(PIPELINES).map(([m, p]) => `
@@ -569,6 +583,14 @@
 
     document.getElementById('panel-footer').innerHTML = '';
 
+    // Tab switching
+    document.getElementById('panel-body').querySelectorAll('[data-tab-pipeline]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.tabPipeline;
+        renderPanelBody(job, t);
+      });
+    });
+
     // Re-run main button uses same pipeline as the current analysis
     document.getElementById('panel-reanalyze')?.addEventListener('click', () => {
       closePanel();
@@ -594,6 +616,41 @@
         analyzeJob(job, null, m);
       });
     });
+  }
+
+  function openPanel(job, pipelineTagOrAnalysis) {
+    // Accept either a pipeline tag string or legacy analysis object
+    let tag = null;
+    if (typeof pipelineTagOrAnalysis === 'string') {
+      tag = pipelineTagOrAnalysis;
+    } else if (pipelineTagOrAnalysis && typeof pipelineTagOrAnalysis === 'object') {
+      // Legacy: received analysis object directly — infer tag from pipeline field
+      tag = pipelineTagOrAnalysis.pipeline || null;
+    }
+
+    // Ensure there's something to show
+    const pipelines = job.pipelines || {};
+    const hasPipelines = Object.keys(pipelines).length > 0;
+    const hasLegacyAnalysis = job.analysis && Number(job.analysis.score_5 || 0) > 0;
+    if (!hasPipelines && !hasLegacyAnalysis) return;
+
+    panelJobData = { job, activeTag: tag };
+
+    const pComp = companyName(job);
+    const pLogoUrl = logoUrl(pComp);
+    const pLogoHtml = pLogoUrl
+      ? `<span style="width:16px;height:16px;border-radius:4px;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;background:#f4f4f4;border:1px solid #e3e3e3;flex-shrink:0;"><img src="${esc(pLogoUrl)}" alt="" width="16" height="16" style="object-fit:contain;display:block;" referrerpolicy="no-referrer"></span>`
+      : `<span style="width:16px;height:16px;border-radius:4px;background:#f4f4f4;border:1px solid #e3e3e3;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#5b5b5b;flex-shrink:0;">${esc((pComp.charAt(0) || '?').toUpperCase())}</span>`;
+
+    const titleEl = document.getElementById('panel-title');
+    if (job.job_url) {
+      titleEl.innerHTML = `<a href="${esc(job.job_url)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-underline-offset:3px;">${esc(job.title ?? '—')} <span style="font-size:13px;opacity:0.5;">↗</span></a>`;
+    } else {
+      titleEl.textContent = job.title ?? '—';
+    }
+    document.getElementById('panel-company').innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;">${pLogoHtml}<span>${esc(pComp)} · ${esc(job.location || '—')}</span></span>`;
+
+    renderPanelBody(job, tag);
 
     document.getElementById('panel-overlay').classList.add('open');
     document.getElementById('side-panel').classList.add('open');
@@ -630,7 +687,7 @@
     activeAnalysisJobs.delete(jkey);
     const footer = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"] .job-footer`);
     if (!footer) return;
-    footer.innerHTML = footerHtml(job, job.analysis?.pipeline);
+    footer.innerHTML = footerHtml(job);
     bindFooterEvents(footer, job);
   }
 
@@ -807,8 +864,15 @@
           const hasAnal = updatedJob.analysis && score > 0;
           const footer  = card.querySelector('.job-footer');
           if (footer) {
-            footer.innerHTML = footerHtml(updatedJob, updatedJob.analysis?.pipeline);
+            footer.innerHTML = footerHtml(updatedJob);
             bindFooterEvents(footer, updatedJob);
+          }
+
+          // If panel is open for this job, refresh it with the new pipeline data
+          if (panelJobData && jobKey(panelJobData.job) === jobKey(updatedJob)) {
+            const openTag = panelJobData.activeTag;
+            panelJobData.job = updatedJob;
+            openPanel(updatedJob, openTag || mode);
           }
 
           // Update content blocks too
@@ -845,11 +909,11 @@
           false,
           null,
           // actions: show an Open button to open the side panel on demand
-          updatedJob.analysis ? [
+          (updatedJob.pipelines && Object.keys(updatedJob.pipelines).length > 0) || updatedJob.analysis ? [
             {
               label: 'Open panel',
               className: 'btn btn-primary btn-sm',
-              onClick: () => openPanel(updatedJob, updatedJob.analysis)
+              onClick: () => openPanel(updatedJob, mode)
             }
           ] : []
         );

@@ -64,10 +64,18 @@ type JobRow = {
   analysis?: unknown;
 };
 
-type CachedJobAnalysis = {
+type SinglePipelineResult = {
   analysis: unknown;
   analyzed_at: string;
   run_id: string;
+};
+
+type CachedJobAnalysis = {
+  pipelines: Record<string, SinglePipelineResult>;
+  // keep old fields for backward compat read
+  analysis?: unknown;
+  analyzed_at?: string;
+  run_id?: string;
 };
 
 type AnalysisCache = Record<string, CachedJobAnalysis>;
@@ -359,13 +367,23 @@ function sanitizeJob(row: JobRow): JobRow {
 }
 
 function hasFullAnalysis(cached: CachedJobAnalysis | undefined): boolean {
-  const analysis = cached?.analysis;
-  return Boolean(
-    analysis &&
-    typeof analysis === "object" &&
-    "pipeline" in analysis &&
-    (analysis as { pipeline?: unknown }).pipeline === "ensemble"
-  );
+  if (!cached) return false;
+  const ensemblePipelines = ["ensemble", "claude-ensemble", "codex-ensemble"];
+  return ensemblePipelines.some(p => cached.pipelines?.[p] != null);
+}
+
+function bestAnalysis(cached: CachedJobAnalysis | undefined): unknown {
+  if (!cached) return null;
+  // prefer ensemble-type pipelines, then whatever is newest
+  const ensemblePipelines = ["ensemble", "claude-ensemble", "codex-ensemble"];
+  for (const p of ensemblePipelines) {
+    if (cached.pipelines?.[p]) return cached.pipelines[p].analysis;
+  }
+  // fallback: latest by analyzed_at
+  const entries = Object.values(cached.pipelines ?? {});
+  if (entries.length === 0) return cached.analysis ?? null;
+  entries.sort((a, b) => (b.analyzed_at ?? "").localeCompare(a.analyzed_at ?? ""));
+  return entries[0].analysis;
 }
 
 function matchRunDir(runId: string): string {
@@ -550,11 +568,12 @@ async function persistRunResults(runId: string, results: Array<Record<string, un
     if (typeof row.provider !== "string" || typeof row.source_key !== "string" || typeof row.job_id !== "string") {
       continue;
     }
-    cache[`${row.provider}|${row.source_key}|${row.job_id}`] = {
-      analysis: row.analysis ?? null,
-      analyzed_at: analyzedAt,
-      run_id: runId,
-    };
+    const key = `${row.provider}|${row.source_key}|${row.job_id}`;
+    const pipelineTag = String((row.analysis as Record<string, unknown>)?.pipeline ?? "maverick");
+    const existing = cache[key] ?? { pipelines: {} };
+    if (!existing.pipelines) existing.pipelines = {};
+    existing.pipelines[pipelineTag] = { analysis: row.analysis ?? null, analyzed_at: analyzedAt, run_id: runId };
+    cache[key] = existing;
     notificationTasks.push(notifyDiscordForScore(row, runId));
   }
 
@@ -930,7 +949,8 @@ app.get("/api/jobs", async (req, res) => {
 
     const enrichedJobs = jobs.map((job) => ({
       ...sanitizeJob(job),
-      analysis: analysisCache[jobCacheKey(job)]?.analysis ?? null,
+      analysis: bestAnalysis(analysisCache[jobCacheKey(job)]),
+      pipelines: analysisCache[jobCacheKey(job)]?.pipelines ?? {},
     }));
 
     res.json({ total, page: pageNum, pageSize, jobs: enrichedJobs });
@@ -950,7 +970,8 @@ app.get("/api/job", async (req, res) => {
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   try {
     const analysisCache = await readAnalysisCache();
-    res.json({ ...sanitizeJob(job), analysis: analysisCache[jobCacheKey(job)]?.analysis ?? null });
+    const cached = analysisCache[jobCacheKey(job)];
+    res.json({ ...sanitizeJob(job), analysis: bestAnalysis(cached), pipelines: cached?.pipelines ?? {} });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
