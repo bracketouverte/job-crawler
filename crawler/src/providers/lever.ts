@@ -42,6 +42,7 @@ export function normalizeLeverJob(sourceKey: string, job: LeverJob, fetchedAt: s
     language: null,
     // Lever only exposes createdAt — no updatedAt field exists in their API
     updated_at: typeof job.createdAt === "number" ? new Date(job.createdAt).toISOString() : null,
+    posted_at: typeof job.createdAt === "number" ? new Date(job.createdAt).toISOString() : null,
     job_url: firstString(job.hostedUrl, job.applyUrl),
     fetched_at: fetchedAt
   };

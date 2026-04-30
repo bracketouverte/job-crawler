@@ -55,6 +55,7 @@ export function normalizeTeamtailorJob(sourceKey: string, item: RssItem, fetched
     office: null,
     language: null,
     updated_at: parseDate(firstString(item.pubDate)),
+    posted_at: parseDate(firstString(item.pubDate)),
     job_url: link,
     fetched_at: fetchedAt
   };

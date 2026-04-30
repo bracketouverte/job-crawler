@@ -44,6 +44,7 @@ export function normalizeAshbyJob(sourceKey: string, job: AshbyJob, fetchedAt: s
     office: firstString(job.workplaceType),
     language: null,
     updated_at: firstString(job.publishedAt),
+    posted_at: firstString(job.publishedAt),
     job_url: firstString(job.jobUrl) ?? `https://jobs.ashbyhq.com/${sourceKey}/${id}`,
     fetched_at: fetchedAt
   };

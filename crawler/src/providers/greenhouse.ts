@@ -47,6 +47,7 @@ export function normalizeGreenhouseJob(sourceKey: string, job: GreenhouseJob, fe
     office: joinStrings(job.offices?.map((item) => item.name)),
     language: firstString(job.language),
     updated_at: firstString(job.updated_at),
+    posted_at: firstString(job.updated_at),
     job_url: firstString(job.absolute_url),
     fetched_at: fetchedAt
   };

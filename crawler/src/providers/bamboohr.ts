@@ -42,6 +42,7 @@ export function normalizeBambooJob(sourceKey: string, job: BambooJob, fetchedAt:
     office: null,
     language: null,
     updated_at: firstString(job.datePosted),
+    posted_at: firstString(job.datePosted),
     job_url: `https://${sourceKey}.bamboohr.com/careers/${id}/detail`,
     fetched_at: fetchedAt
   };

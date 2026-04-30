@@ -40,6 +40,7 @@ export type NormalizedJob = {
   office: string | null;
   language: string | null;
   updated_at: string | null;
+  posted_at: string | null;
   job_url: string | null;
   fetched_at: string;
 };

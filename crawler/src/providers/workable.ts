@@ -55,6 +55,7 @@ export function normalizeWorkableJob(sourceKey: string, job: WorkableJob, fetche
     office: officeType(job.telecommuting),
     language: null,
     updated_at: firstString(job.published_on, job.created_at),
+    posted_at: firstString(job.published_on, job.created_at),
     job_url: firstString(job.url, job.shortlink, job.application_url),
     fetched_at: fetchedAt
   };

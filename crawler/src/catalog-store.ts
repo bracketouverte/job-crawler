@@ -18,6 +18,7 @@ type CatalogRow = {
   office: string | null;
   language: string | null;
   updated_at: string | null;
+  posted_at: string | null;
   job_url: string | null;
   fetched_at: string;
   first_seen_at: string;
@@ -53,6 +54,7 @@ export class CatalogStore {
         office TEXT,
         language TEXT,
         updated_at TEXT,
+        posted_at TEXT,
         job_url TEXT,
         fetched_at TEXT NOT NULL,
         first_seen_at TEXT NOT NULL,
@@ -66,6 +68,7 @@ export class CatalogStore {
       DROP INDEX IF EXISTS catalog_jobs_title_lower_idx;
       DROP INDEX IF EXISTS catalog_jobs_location_lower_idx;
     `);
+    this.ensureColumn("catalog_jobs", "posted_at", "TEXT");
 
     this.upsertOne = this.db.prepare(`
       INSERT INTO catalog_jobs (
@@ -80,6 +83,7 @@ export class CatalogStore {
         office,
         language,
         updated_at,
+        posted_at,
         job_url,
         fetched_at,
         first_seen_at,
@@ -98,6 +102,7 @@ export class CatalogStore {
         @office,
         @language,
         @updated_at,
+        @posted_at,
         @job_url,
         @fetched_at,
         @first_seen_at,
@@ -114,6 +119,7 @@ export class CatalogStore {
         office = excluded.office,
         language = excluded.language,
         updated_at = excluded.updated_at,
+        posted_at = excluded.posted_at,
         job_url = excluded.job_url,
         fetched_at = excluded.fetched_at,
         last_seen_at = excluded.last_seen_at,
@@ -134,9 +140,10 @@ export class CatalogStore {
           office: job.office,
           language: job.language,
           updated_at: job.updated_at,
+          posted_at: job.posted_at,
           job_url: job.job_url,
           fetched_at: job.fetched_at,
-          first_seen_at: job.fetched_at ?? now,
+          first_seen_at: job.posted_at ?? job.fetched_at ?? now,
           last_seen_at: job.fetched_at ?? now,
           seen_run_id: runId,
           raw_json: "null"
@@ -157,6 +164,7 @@ export class CatalogStore {
         office,
         language,
         updated_at,
+        posted_at,
         job_url,
         fetched_at,
         first_seen_at,
@@ -164,6 +172,14 @@ export class CatalogStore {
       FROM catalog_jobs
       ORDER BY provider, source_key, job_id
     `);
+  }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (rows.some((row) => row.name === column)) {
+      return;
+    }
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
   recordJobs(jobs: NormalizedJob[], runId: string): void {
