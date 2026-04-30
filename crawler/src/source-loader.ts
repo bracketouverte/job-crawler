@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Provider, providers, SourceEntry, SourceFile } from "./types.js";
 
@@ -35,6 +36,10 @@ export function parseProviderList(value: string): Provider[] {
 
 export async function loadSourceFile(sourcesDir: string, provider: Provider): Promise<SourceFile> {
   const file = join(sourcesDir, `${provider}.json`);
+  if (!existsSync(file)) {
+    console.warn(`[source-loader] ${file} not found, skipping provider "${provider}"`);
+    return { provider, companies: [] };
+  }
   const raw = await readFile(file, "utf8");
   const parsed = JSON.parse(raw) as Partial<SourceFile>;
 
