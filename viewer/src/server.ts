@@ -827,15 +827,17 @@ async function executeMatchRun(runId: string, jobs: JobRow[], mode?: string): Pr
     const preparedManifest = await writeBatchInput(runId, jobs, runningManifest);
     await writeManifest(preparedManifest);
 
-    const isEnsemble = mode === "ensemble" || mode === "claude-ensemble";
+    const isEnsemble = mode === "ensemble" || mode === "claude-ensemble" || mode === "codex-ensemble";
+    const isCodex = mode === "codex" || mode === "codex-ensemble";
     const script = isEnsemble
-      ? join(MATCHER_DIR, "ensemble_runner.py")
-      : join(MATCHER_DIR, "job_fit_analyzer.py");
+      ? join(MATCHER_DIR, isCodex ? "ensemble_runner_codex.py" : "ensemble_runner.py")
+      : join(MATCHER_DIR, isCodex ? "job_fit_analyzer_codex.py" : "job_fit_analyzer.py");
 
     // Pipeline tag controls what's written to analysis.pipeline in output.
-    // claude / claude-ensemble = new structured pre-extraction pipeline (this branch).
+    // claude / claude-ensemble = structured pre-extraction (this branch).
+    // codex / codex-ensemble   = Codex's parallel implementation.
     // maverick / ensemble      = original single-pass pipeline.
-    const pipelineTag = (mode === "claude" || mode === "claude-ensemble")
+    const pipelineTag = (mode === "claude" || mode === "claude-ensemble" || mode === "codex" || mode === "codex-ensemble")
       ? mode
       : isEnsemble ? "ensemble" : "maverick";
 

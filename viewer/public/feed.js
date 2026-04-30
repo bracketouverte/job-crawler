@@ -177,10 +177,12 @@
   /* ── Footer HTML ─────────────────────────────────────────────── */
   // Pipeline metadata: color, label, CSS class, spark color class
   const PIPELINES = {
-    'maverick':        { color: '#2563eb', label: 'Quick',         btnClass: 'btn-analyze--quick', spark: 'btn-spark--blue',   dur: '~20s',  swatchClass: 'menu-swatch--maverick' },
-    'ensemble':        { color: '#7c3aed', label: 'Full',          btnClass: 'btn-analyze--full',  spark: 'btn-spark--purple', dur: '~2min', swatchClass: 'menu-swatch--ensemble' },
+    'maverick':        { color: '#2563eb', label: 'Quick',         btnClass: 'btn-analyze--quick',      spark: 'btn-spark--blue',   dur: '~20s',  swatchClass: 'menu-swatch--maverick' },
+    'ensemble':        { color: '#7c3aed', label: 'Full',          btnClass: 'btn-analyze--full',       spark: 'btn-spark--purple', dur: '~2min', swatchClass: 'menu-swatch--ensemble' },
     'claude':          { color: '#0d9488', label: 'Claude Quick',  btnClass: 'btn-analyze--claude',     spark: 'btn-spark--teal',   dur: '~25s',  swatchClass: 'menu-swatch--claude' },
     'claude-ensemble': { color: '#4338ca', label: 'Claude Full',   btnClass: 'btn-analyze--claude-ens', spark: 'btn-spark--indigo', dur: '~2min', swatchClass: 'menu-swatch--claude-ens' },
+    'codex':           { color: '#b45309', label: 'Codex Quick',   btnClass: 'btn-analyze--codex',      spark: 'btn-spark--amber',  dur: '~25s',  swatchClass: 'menu-swatch--codex' },
+    'codex-ensemble':  { color: '#7f1d1d', label: 'Codex Full',    btnClass: 'btn-analyze--codex-ens',  spark: 'btn-spark--red',    dur: '~2min', swatchClass: 'menu-swatch--codex-ens' },
   };
 
   function footerHtml(job, pipeline) {
@@ -211,6 +213,8 @@
       ${btn('ensemble', 'js-analyze-full')}
       ${btn('claude',   'js-analyze-claude')}
       ${btn('claude-ensemble', 'js-analyze-claude-ens')}
+      ${btn('codex',          'js-analyze-codex')}
+      ${btn('codex-ensemble', 'js-analyze-codex-ens')}
       <button class="btn btn-ghost js-jd-data" title="Extracted JD data">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> JD data
       </button>
@@ -223,6 +227,8 @@
     footer.querySelector('.js-analyze-full')?.addEventListener('click',       () => analyzeJob(job, null, 'ensemble'));
     footer.querySelector('.js-analyze-claude')?.addEventListener('click',     () => analyzeJob(job, null, 'claude'));
     footer.querySelector('.js-analyze-claude-ens')?.addEventListener('click', () => analyzeJob(job, null, 'claude-ensemble'));
+    footer.querySelector('.js-analyze-codex')?.addEventListener('click',      () => analyzeJob(job, null, 'codex'));
+    footer.querySelector('.js-analyze-codex-ens')?.addEventListener('click',  () => analyzeJob(job, null, 'codex-ensemble'));
     footer.querySelector('.js-jd-data')?.addEventListener('click',            () => openJdModal(job));
     footer.querySelector('.js-hide')?.addEventListener('click',               () => hideJob(jobKey(job), job));
   }
@@ -492,8 +498,10 @@
       ensemble: 'Ensemble pipeline',
       claude: 'Claude Quick',
       'claude-ensemble': 'Claude Full',
+      codex: 'Codex Quick',
+      'codex-ensemble': 'Codex Full',
     };
-    const pipelineCssClass = { maverick: 'pipeline-maverick', ensemble: 'pipeline-ensemble', claude: 'pipeline-claude', 'claude-ensemble': 'pipeline-claude-ensemble' }[pipeline] || 'pipeline-maverick';
+    const pipelineCssClass = { maverick: 'pipeline-maverick', ensemble: 'pipeline-ensemble', claude: 'pipeline-claude', 'claude-ensemble': 'pipeline-claude-ensemble', codex: 'pipeline-codex', 'codex-ensemble': 'pipeline-codex-ensemble' }[pipeline] || 'pipeline-maverick';
     const pipelineBadge = `<span class="pipeline-badge ${pipelineCssClass}">${esc(pipelineBadgeLabels[pipeline] || pipeline)}</span>`;
 
     const strengths = Array.isArray(analysis.requirement_match)
@@ -602,6 +610,8 @@
     'ensemble':        'js-analyze-full',
     'claude':          'js-analyze-claude',
     'claude-ensemble': 'js-analyze-claude-ens',
+    'codex':           'js-analyze-codex',
+    'codex-ensemble':  'js-analyze-codex-ens',
   };
 
   function setMainBtnSpinner(job, label, mode, source = 'manual') {
@@ -636,11 +646,11 @@
   }
 
   function modeLabel(mode) {
-    const labels = { maverick: 'Preview · Maverick', ensemble: 'Ensemble pipeline', claude: 'Claude Quick', 'claude-ensemble': 'Claude Full' };
+    const labels = { maverick: 'Preview · Maverick', ensemble: 'Ensemble pipeline', claude: 'Claude Quick', 'claude-ensemble': 'Claude Full', codex: 'Codex Quick', 'codex-ensemble': 'Codex Full' };
     return labels[mode] || mode;
   }
   function modeDuration(mode) {
-    return (mode === 'ensemble' || mode === 'claude-ensemble') ? '~2 min' : '~25 sec';
+    return (mode === 'ensemble' || mode === 'claude-ensemble' || mode === 'codex-ensemble') ? '~2 min' : '~25 sec';
   }
 
   function renderAutoAnalyzerToast(status) {
