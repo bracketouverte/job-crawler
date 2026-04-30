@@ -274,6 +274,65 @@ function companyName(job: Pick<JobRow, "provider" | "source_key">): string {
   return job.source_key;
 }
 
+function normalizeLabel(value: string | null | undefined): string {
+  return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+function jobMode(location: string | null | undefined, employmentType: string | null | undefined): string {
+  const normalizedLocation = normalizeLabel(location);
+  const normalizedEmploymentType = normalizeLabel(employmentType);
+  const combined = `${normalizedLocation} ${normalizedEmploymentType}`.toLowerCase();
+
+  if (/\bremote\b/.test(combined)) return "Remote";
+  if (/\bhybrid\b/.test(combined)) return "Hybrid";
+  if (/\bonsite\b|\bon-site\b|\bin-office\b|\boffice\b/.test(combined)) return "On-site";
+
+  return normalizedLocation || normalizedEmploymentType || "n/a";
+}
+
+function jobCompensation(compensation: string | null | undefined): string {
+  return normalizeLabel(compensation) || "n/a";
+}
+
+function decisionEmoji(score: number): string {
+  if (score >= 4.75) return "🌟 Top pick";
+  if (score >= 4.5) return "🎯 Strong match";
+  if (score > 4.2) return "⚡ Quick apply";
+  return "✅ Worth applying";
+}
+
+function companyLogoUrl(company: string): string | null {
+  if (!LOGO_DEV_PUBLISHABLE_KEY) {
+    return null;
+  }
+
+  const normalizedCompany = normalizeLabel(company);
+  if (!normalizedCompany) {
+    return null;
+  }
+
+  const cachedDomain = logoDevBrandCache.get(normalizedCompany.toLowerCase());
+  if (cachedDomain) {
+    return `https://img.logo.dev/${encodeURIComponent(cachedDomain)}?token=${encodeURIComponent(LOGO_DEV_PUBLISHABLE_KEY)}&size=64&format=png&fallback=404`;
+  }
+
+  return `https://img.logo.dev/name/${encodeURIComponent(normalizedCompany)}?token=${encodeURIComponent(LOGO_DEV_PUBLISHABLE_KEY)}&size=64&format=png&fallback=404`;
+}
+
+function companyWebsite(company: string): string | null {
+  const normalizedCompany = normalizeLabel(company);
+  if (!normalizedCompany) {
+    return null;
+  }
+
+  const cachedDomain = logoDevBrandCache.get(normalizedCompany.toLowerCase());
+  if (cachedDomain) {
+    return `https://${cachedDomain}`;
+  }
+
+  return null;
+}
+
 function jobCacheKey(job: Pick<JobRow, "provider" | "source_key" | "job_id">): string {
   return `${job.provider}|${job.source_key}|${job.job_id}`;
 }
@@ -436,22 +495,31 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
 
   const title = String(row.title ?? "Job");
   const company = String(row.company ?? row.source_key);
-  const location = String(row.location ?? "");
   const jobUrl = String(row.job_url ?? row.url ?? "");
-  const content = [
-    `**${score.toFixed(1)}/5 fit** · ${title}`,
-    company,
-    location ? `Location: ${location}` : "",
-    `Recommendation: ${analysisRecommendation(analysis)}`,
-    jobUrl,
-  ].filter(Boolean).join("\n");
+  const thumbnailUrl = companyLogoUrl(company);
+  const companyUrl = companyWebsite(company);
+  const embed = {
+    title,
+    url: jobUrl || undefined,
+    color: 3066993,
+    ...(thumbnailUrl ? { thumbnail: { url: thumbnailUrl } } : {}),
+    fields: [
+      { name: "Score", value: `${score.toFixed(1)}/5`, inline: true },
+      { name: "Company", value: company || "n/a", inline: true },
+      { name: "Location", value: normalizeLabel(row.location as string | null | undefined) || "n/a", inline: true },
+      { name: "Mode", value: jobMode(row.location as string | null | undefined, row.employment_type as string | null | undefined), inline: true },
+      { name: "Compensation", value: jobCompensation(row.compensation as string | null | undefined), inline: true },
+      { name: "Decision", value: decisionEmoji(score), inline: false },
+    ],
+    ...(companyUrl ? { footer: { text: companyUrl } } : {}),
+  };
 
   const response = await fetch(DISCORD_WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      username: "Job Scrapper",
-      content,
+      username: "Job Scanner",
+      embeds: [embed],
       allowed_mentions: { parse: [] },
     }),
   });

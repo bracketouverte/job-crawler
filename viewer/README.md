@@ -55,6 +55,14 @@ The viewer expects access to the matcher codebase because it can parse job URLs 
 - `GET /api/job-parsed`
 - `GET /api/logo-dev/brand`
 
+## Discord Notifications
+
+Automatically sends Discord embeds when job matches score above the threshold. Each notification includes job title (linked), company logo thumbnail, score, location, mode, compensation, decision emoji, and company website link.
+
+**Setup**: Create a Discord webhook, add `DISCORD_WEBHOOK_URL` to `.env`, set `SCORE_NOTIFY_MIN_SCORE` threshold (default `4`).
+
+**Decision emojis**: ✅ 4.0–4.2 | ⚡ 4.2–4.5 | 🎯 4.5–4.75 | 🌟 4.75+
+
 ## UI Features
 
 - saved-search buttons loaded from `public/saved-searches.json`
