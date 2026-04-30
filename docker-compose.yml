@@ -33,13 +33,15 @@ services:
       - "3000:3000"
     volumes:
       - ./viewer/public:/app/public:ro
-      - /home/michael/www/job-scrapper/crawler/state:/app/state
+      - ./crawler/state:/app/state
       - ./matcher:/matcher:ro
     environment:
       CATALOG_DB: /app/state/catalog.sqlite
       CAREER_OPS_DIR: ${CAREER_OPS_DIR:-career-ops}
       LOGO_DEV_PUBLISHABLE_KEY: ${LOGO_DEV_PUBLISHABLE_KEY:-}
       LOGO_DEV_SECRET_KEY: ${LOGO_DEV_SECRET_KEY:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      SCORE_NOTIFY_MIN_SCORE: ${SCORE_NOTIFY_MIN_SCORE:-4}
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       NVIDIA_MODEL: ${NVIDIA_MODEL:-meta/llama-4-maverick-17b-128e-instruct}
     restart: unless-stopped
@@ -49,6 +51,7 @@ services:
       context: ./scheduler
     environment:
       - PROJECT_DIR=${PWD}
+      - TZ=${TZ:-America/New_York}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/project:ro
