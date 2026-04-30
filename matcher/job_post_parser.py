@@ -14,6 +14,11 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 
+try:
+    from matching_intelligence import extract_tools
+except ImportError:  # pragma: no cover - package import path
+    from .matching_intelligence import extract_tools
+
 DEFAULT_TIMEOUT = (10, 60)
 
 RESPONSIBILITY_KEYWORDS_RAW = {
@@ -42,6 +47,21 @@ REQUIREMENT_KEYWORDS_RAW = {
     "nice to have",
     "what you bring",
     "skills",
+}
+
+NICE_TO_HAVE_KEYWORDS_RAW = {
+    "nice to haves",
+    "nice to have",
+    "nice-to-haves",
+    "nice-to-have",
+    "preferred qualifications",
+    "preferred requirements",
+    "preferred skills",
+    "bonus points",
+    "bonus",
+    "extra credit",
+    "would be a plus",
+    "a plus",
 }
 
 STOPWORDS = {
@@ -118,6 +138,7 @@ def normalize_heading(value):
 
 RESPONSIBILITY_KEYWORDS = {normalize_heading(value) for value in RESPONSIBILITY_KEYWORDS_RAW}
 REQUIREMENT_KEYWORDS = {normalize_heading(value) for value in REQUIREMENT_KEYWORDS_RAW}
+NICE_TO_HAVE_KEYWORDS = {normalize_heading(value) for value in NICE_TO_HAVE_KEYWORDS_RAW}
 
 
 def is_heading(line):
@@ -133,6 +154,14 @@ def heading_matches(normalized_heading, keywords):
     if normalized_heading in keywords:
         return True
     return any(keyword in normalized_heading for keyword in keywords if len(keyword) >= 6)
+
+
+def is_nice_to_have_heading(heading):
+    return heading_matches(normalize_heading(heading), NICE_TO_HAVE_KEYWORDS)
+
+
+def is_requirement_heading(heading):
+    return heading_matches(normalize_heading(heading), REQUIREMENT_KEYWORDS) and not is_nice_to_have_heading(heading)
 
 
 def html_to_lines(html_text):
@@ -201,6 +230,20 @@ def select_section(sections, keywords):
         if heading_matches(normalize_heading(heading), keywords) and lines:
             return lines
     return []
+
+
+def select_sections(sections, predicate):
+    selected = []
+    for heading, lines in sections.items():
+        if predicate(heading) and lines:
+            selected.extend(lines)
+    return selected
+
+
+def split_requirement_sections(sections):
+    must_have = bulletize(select_sections(sections, is_requirement_heading), limit=12)
+    nice_to_have = bulletize(select_sections(sections, is_nice_to_have_heading), limit=10)
+    return must_have, nice_to_have
 
 
 def infer_workplace_type(*values):
@@ -280,7 +323,8 @@ def extract_concepts(title, *blocks, limit=10):
     return selected
 
 
-def build_result(url, provider, title, posted_datetime, location, compensation, workplace_type, employment_type, responsibilities, requirements_summary, concept_text):
+def build_result(url, provider, title, posted_datetime, location, compensation, workplace_type, employment_type, responsibilities, requirements_summary, concept_text, nice_to_have_requirements=None):
+    nice_to_have_requirements = nice_to_have_requirements or []
     return {
         "url": url,
         "provider": provider,
@@ -293,6 +337,17 @@ def build_result(url, provider, title, posted_datetime, location, compensation, 
         "employment_type": employment_type,
         "responsibilities": responsibilities,
         "requirements_summary": requirements_summary,
+        "must_have_requirements": requirements_summary,
+        "nice_to_have_requirements": nice_to_have_requirements,
+        "technical_tools_mentioned": extract_tools("\n".join([
+            str(title or ""),
+            str(location or ""),
+            str(compensation or ""),
+            str(concept_text or ""),
+            "\n".join(responsibilities),
+            "\n".join(requirements_summary),
+            "\n".join(nice_to_have_requirements),
+        ])),
     }
 
 
@@ -386,7 +441,7 @@ def parse_greenhouse(url):
     content = html.unescape(html.unescape(payload.get("content", "")))
     sections = extract_sections_from_html(content)
     responsibilities = bulletize(select_section(sections, RESPONSIBILITY_KEYWORDS))
-    requirements = bulletize(select_section(sections, REQUIREMENT_KEYWORDS))
+    requirements, nice_to_have = split_requirement_sections(sections)
     location = ((payload.get("location") or {}).get("name") if isinstance(payload.get("location"), dict) else None)
 
     return build_result(
@@ -400,6 +455,7 @@ def parse_greenhouse(url):
         employment_type=infer_employment_type(content),
         responsibilities=responsibilities,
         requirements_summary=requirements,
+        nice_to_have_requirements=nice_to_have,
         concept_text="\n".join(html_to_lines(content)),
     )
 
@@ -431,12 +487,15 @@ def parse_lever(url):
 
     responsibilities = []
     requirements = []
+    nice_to_have = []
     for section in job.get("lists") or []:
         heading = normalize_heading(str(section.get("text", "")))
         content = str(section.get("content", ""))
         lines = html_to_lines(content)
         if heading in RESPONSIBILITY_KEYWORDS:
             responsibilities = bulletize(lines, limit=12)
+        elif heading in NICE_TO_HAVE_KEYWORDS:
+            nice_to_have = bulletize(lines, limit=10)
         elif heading in REQUIREMENT_KEYWORDS:
             requirements = bulletize(lines, limit=12)
 
@@ -462,6 +521,7 @@ def parse_lever(url):
         employment_type=infer_employment_type(categories.get("commitment"), description_text),
         responsibilities=responsibilities,
         requirements_summary=requirements,
+        nice_to_have_requirements=nice_to_have,
         concept_text=description_text,
     )
 
@@ -482,6 +542,7 @@ def parse_bamboohr(url):
     ) if part) or None
     description = str(job.get("description", ""))
     sections = extract_sections_from_html(description)
+    requirements, nice_to_have = split_requirement_sections(sections)
 
     return build_result(
         url=url,
@@ -493,7 +554,8 @@ def parse_bamboohr(url):
         workplace_type=infer_workplace_type(location, description),
         employment_type=infer_employment_type(job.get("employmentStatusLabel"), description),
         responsibilities=bulletize(select_section(sections, RESPONSIBILITY_KEYWORDS)),
-        requirements_summary=bulletize(select_section(sections, REQUIREMENT_KEYWORDS)),
+        requirements_summary=requirements,
+        nice_to_have_requirements=nice_to_have,
         concept_text="\n".join(html_to_lines(description)),
     )
 
@@ -507,6 +569,7 @@ def parse_generic_jobposting(url):
 
     description = str(jobposting.get("description", ""))
     sections = extract_sections_from_html(description)
+    requirements, nice_to_have = split_requirement_sections(sections)
     location = extract_ld_json_location(jobposting)
     workplace_type = infer_workplace_type(
         str(jobposting.get("jobLocationType", "")),
@@ -524,7 +587,8 @@ def parse_generic_jobposting(url):
         workplace_type=workplace_type,
         employment_type=infer_employment_type(jobposting.get("employmentType"), description),
         responsibilities=bulletize(select_section(sections, RESPONSIBILITY_KEYWORDS)),
-        requirements_summary=bulletize(select_section(sections, REQUIREMENT_KEYWORDS)),
+        requirements_summary=requirements,
+        nice_to_have_requirements=nice_to_have,
         concept_text="\n".join(html_to_lines(description)),
     )
 

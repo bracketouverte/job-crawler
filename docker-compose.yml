@@ -9,6 +9,17 @@ services:
       - ./matcher:/app
     restart: "no"
 
+  eval:
+    build:
+      context: ./matcher
+    working_dir: /app
+    entrypoint: ["python", "/app/eval/eval.py"]
+    environment:
+      CAREER_OPS_DIR: ${CAREER_OPS_DIR:-career-ops}
+    volumes:
+      - ./matcher:/app
+    restart: "no"
+
   matcher:
     build:
       context: ./matcher

@@ -1,0 +1,76 @@
+[
+  {
+    "id": "roompricegenie-eu-only",
+    "description": "EU-only remote role — should be incompatible for a US-based candidate",
+    "url": "https://jobs.ashbyhq.com/roompricegenie/014abb22-5c0e-4fb4-b665-8f991c1d4fca",
+    "jd_text": "Location  Remote Germany; Remote Austria; Remote Netherlands; Remote Portugal; Remote Spain; Remote UK\n\nAbout RoomPriceGenie\nRoomPriceGenie is the easiest way for hoteliers to ensure their rooms are always priced right. Built for independent hoteliers and small hotel chains, our automated pricing platform helps hotels increase revenue without the complexity of traditional revenue management.\n\nThe Role\nWe are looking for a Senior Product Manager to join our product team. You will work closely with engineering, design, and customers to shape the product roadmap and deliver value to our hotel customers.\n\nRequirements:\n- 5+ years of product management experience in B2B SaaS\n- Strong analytical mindset with experience in data-driven decision making\n- Experience working with cross-functional teams\n- Excellent written and verbal communication skills in English\n- Must be located in Germany, Austria, Netherlands, Portugal, Spain, or the UK\n\nNice to have:\n- Experience in the hospitality or revenue management industry\n- German or Dutch language skills",
+    "expected": {
+      "location_status": "incompatible",
+      "eligible_countries": ["AT", "DE", "ES", "NL", "PT", "UK"],
+      "verdict_must_not_be": "yes",
+      "application_recommendation_must_not_be": ["apply_now", "worth_applying"],
+      "must_have_blocker": true,
+      "notes": "Role is explicitly restricted to 6 European countries. US candidate is incompatible regardless of skill match."
+    }
+  },
+  {
+    "id": "cgm-workday-remote-us",
+    "description": "Workday JD says Remote United States — should be compatible despite mention of Texas",
+    "url": "https://cgm.wd3.myworkdayjobs.com/en-US/cgm/job/Product-Manager_JR109379-1",
+    "jd_text": "Location: Remote - United States of America\n\nAbout CGM\nCGM is a leading healthcare IT company providing software and services to healthcare organizations.\n\nThe Role\nWe are seeking a Product Manager to drive our clinical product suite. This role is fully remote within the United States.\n\nResponsibilities:\n- Define product strategy and roadmap for clinical software products\n- Collaborate with engineering and clinical teams\n- Gather and prioritize customer requirements\n- Drive product launches and go-to-market strategy\n\nRequirements:\n- 5+ years of product management experience\n- Experience with healthcare or clinical software (required)\n- Strong communication and leadership skills\n- Bachelor's degree or equivalent experience\n\nPreferred:\n- Experience with HL7 or FHIR standards\n- Healthcare domain certification\n\nCompensation: $130,000 - $160,000 annually. Our office is based in Austin, Texas, but this role is fully remote.",
+    "expected": {
+      "location_status": "compatible",
+      "workplace_type": "remote",
+      "must_not_have_geographic_blocker": true,
+      "notes": "Remote US role. Mention of Texas is office location context, not a work location requirement. Should not create geographic mismatch."
+    }
+  },
+  {
+    "id": "twilio-remote-us-state-exclusions",
+    "description": "Remote US role with state exclusion list that does NOT include Florida",
+    "url": "https://job-boards.greenhouse.io/twilio/jobs/7851194",
+    "jd_text": "Location: Remote - US\n\nAbout Twilio\nTwilio is the world's leading customer engagement platform.\n\nThe Role\nWe are looking for a Senior Product Manager to join our platform team.\n\nResponsibilities:\n- Drive product strategy for our messaging APIs\n- Work with enterprise customers to understand needs\n- Define and prioritize the product roadmap\n- Collaborate with engineering and design\n\nRequirements:\n- 5+ years PM experience in SaaS or API products\n- Experience with developer-facing products\n- Strong analytical and communication skills\n\nNice to have:\n- Experience with communications or CPaaS platforms\n- Understanding of REST APIs\n\nCompensation:\nThe estimated pay range for this role, based on the hiring range for this position and your location, is $130,000-$180,000 USD. Note: This role is not eligible for employment in California (CA), Connecticut (CT), New Jersey (NJ), New York (NY), Pennsylvania (PA), or Washington (WA).\n\nThis role will be remote, but is not eligible to be hired in CA, CT, NJ, NY, PA, WA.",
+    "expected": {
+      "location_status": "compatible",
+      "excluded_regions": ["CA", "CT", "NJ", "NY", "PA", "WA"],
+      "must_not_include_fl_exclusion": true,
+      "must_not_have_geographic_blocker": true,
+      "notes": "Remote US role. FL is not in the exclusion list. State exclusion list must not be mistaken for the job location. Compensation note lists states for pay transparency, not location."
+    }
+  },
+  {
+    "id": "remote-us-no-exclusions",
+    "description": "Clean Remote US role — no state restrictions",
+    "url": "https://example.com/job/pm-saas",
+    "jd_text": "Location: Remote, United States\n\nAbout the Company\nWe are a fast-growing B2B SaaS company in the HR tech space.\n\nThe Role\nSenior Product Manager responsible for our core platform. This position is fully remote and open to candidates across the United States.\n\nResponsibilities:\n- Lead product discovery and roadmap for core platform\n- Partner with engineering on technical architecture decisions\n- Own metrics and OKRs for platform reliability\n\nRequirements:\n- 6+ years of product management experience in SaaS (required)\n- Track record of shipping B2B platform products\n- Experience working closely with engineering teams\n\nNice to have:\n- Experience with HR or payroll software\n- Familiarity with SQL or data querying",
+    "expected": {
+      "location_status": "compatible",
+      "workplace_type": "remote",
+      "must_not_have_geographic_blocker": true,
+      "notes": "Fully open Remote US. Should be compatible with no caveats."
+    }
+  },
+  {
+    "id": "hybrid-nyc-onsite",
+    "description": "Hybrid NYC role — on-site requirement, US candidate not in NY",
+    "url": "https://example.com/job/pm-hybrid-nyc",
+    "jd_text": "Location: New York, NY (Hybrid - 3 days in office required)\n\nAbout the Company\nA fintech startup based in New York City building the next generation of payment infrastructure.\n\nThe Role\nWe're hiring a Senior PM to lead our payments product. This is a hybrid role requiring 3 days per week in our New York City office.\n\nRequirements:\n- 5+ years PM in fintech or payments (required)\n- Must be located in or willing to relocate to New York metropolitan area\n- Deep understanding of payment processing and regulatory frameworks\n\nNice to have:\n- Experience with ISO 20022\n- Banking or financial services background",
+    "expected": {
+      "location_status": "incompatible",
+      "workplace_type": "hybrid",
+      "must_have_geographic_blocker": true,
+      "notes": "Hybrid NYC with explicit office requirement. A Florida-based candidate cannot satisfy this without relocation."
+    }
+  },
+  {
+    "id": "eu-remote-ambiguous",
+    "description": "Remote role listing multiple EU countries — ambiguous whether US is eligible",
+    "url": "https://example.com/job/pm-eu-ambiguous",
+    "jd_text": "We are a European SaaS company hiring a Product Manager. This role is remote-friendly and we primarily hire across our European offices in Germany, France, Netherlands, and Spain. We may consider candidates in the UK.\n\nRequirements:\n- 4+ years of product experience\n- Fluent in English\n- Comfortable working with CET/CEST timezone teams\n\nNice to have:\n- German or French language skills",
+    "expected": {
+      "location_status": "incompatible",
+      "eligible_countries": ["DE", "FR", "NL", "ES", "UK"],
+      "notes": "Even though phrased as 'remote-friendly', explicit European country scope with no US mention. Should be flagged incompatible."
+    }
+  }
+]

@@ -14,6 +14,21 @@ import re
 import time
 import requests
 
+try:
+    from matching_intelligence import (
+        build_match_context,
+        build_match_context_from_profile_data,
+        build_profile_text,
+        format_match_context,
+    )
+except ImportError:  # pragma: no cover - package import path
+    from .matching_intelligence import (
+        build_match_context,
+        build_match_context_from_profile_data,
+        build_profile_text,
+        format_match_context,
+    )
+
 # ============ CONFIGURATION ============
 NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 DEFAULT_MODEL = "meta/llama-4-maverick-17b-128e-instruct"
@@ -129,6 +144,13 @@ Check C — Explicit must-have requirements with no CV evidence:
 - Do NOT use "transferable skills" or "adjacent experience" to satisfy a hard requirement. The standard is: did the candidate actually do this specific thing?
 - Example: "3+ years managing eCommerce websites" — a B2B SaaS background does NOT satisfy this. Mark as unmet.
 
+Check D — Geographic eligibility:
+- Use the structured match context supplied with the JD. It was extracted generically from the candidate profile and JD.
+- If `matches.location.status` is `incompatible` → cap `workplace_fit` at 1.5 and add a blocker with the structured reason.
+- If `matches.location.status` is `compatible` → do not invent geographic blockers.
+- Do not infer job location from compensation notes. Compensation geography is not the same as work eligibility.
+- Excluded regions only block the candidate if they overlap the candidate's extracted region(s).
+
 === END PRE-SCORING CHECKS ===
 
 {{
@@ -197,6 +219,14 @@ Check C — Explicit must-have requirements with no CV evidence:
       "mitigation": "regulatory/compliance adjacency and fast ramp plan"
     }}
   ],
+  "tool_match": [
+    {{
+      "tool": "Snowflake",
+      "profile_evidence": "Explicit evidence from profile or empty string",
+      "strength": "missing",
+      "importance": "important"
+    }}
+  ],
   "gaps": [
     {{
       "gap": "No direct payroll background",
@@ -226,7 +256,11 @@ Rules:
 - `strength` in `requirement_match` must be one of: strong, good, partial, weak, missing.
 - `gap_type` in `requirement_match` must be one of: none, adjacent_only, direct_gap, unknown.
 - `importance` in `evidence` must be one of: must_have, important, nice_to_have.
+- `tool_match[].strength` must be one of: direct, adjacent, missing, not_relevant.
 - Be strict on must-haves, but distinguish hard blockers from nice-to-haves.
+- Use `job_facts.requirement_groups.must_have` as the primary must-have checklist when present.
+- Use `job_facts.requirement_groups.nice_to_have` as nice-to-have only; do not create blockers for those items.
+- Use `matches.technical_tools` as the initial tool checklist, but you may upgrade a missing tool to adjacent if the profile has credible adjacent evidence.
 - Produce at least 6 lines in `requirement_match` if the JD contains enough information.
 - Do not fall back to generic bullets. Use the distinctive signals of the role: domain, stack, regulation, AI, seniority, platform type.
 """
@@ -405,6 +439,25 @@ def normalize_analysis_result(result):
                 "mitigation": sanitize_text(item.get("mitigation", "")),
             })
 
+    normalized_tool_match = []
+    tool_match = result.get("tool_match")
+    if isinstance(tool_match, list):
+        for item in tool_match[:16]:
+            if not isinstance(item, dict):
+                continue
+            strength = str(item.get("strength", "missing")).strip().lower()
+            if strength not in {"direct", "adjacent", "missing", "not_relevant"}:
+                strength = "missing"
+            importance = str(item.get("importance", "important")).strip().lower()
+            if importance not in {"must_have", "important", "nice_to_have"}:
+                importance = "important"
+            normalized_tool_match.append({
+                "tool": sanitize_text(item.get("tool", "")),
+                "profile_evidence": sanitize_text(item.get("profile_evidence", "")),
+                "strength": strength,
+                "importance": importance,
+            })
+
     normalized_gaps = []
     gaps = result.get("gaps")
     if isinstance(gaps, list):
@@ -446,6 +499,7 @@ def normalize_analysis_result(result):
         },
         "evidence": normalized_evidence,
         "requirement_match": normalized_requirement_match,
+        "tool_match": normalized_tool_match,
         "gaps": normalized_gaps,
         "standout_differentiator": sanitize_text(result.get("standout_differentiator", "")),
         "forces": forces,
@@ -461,17 +515,91 @@ def normalize_analysis_result(result):
     }
 
 
-def calculate_fit(jd_text, system_prompt, api_key, model, job_label=None):
+def remove_incompatible_location_false_positives(analysis):
+    location_terms = ("geographic mismatch", "location mismatch", "state exclusion", "country mismatch")
+    for key in ("blockers", "faiblesses"):
+        analysis[key] = [
+            item for item in analysis.get(key, [])
+            if not any(term in str(item).lower() for term in location_terms)
+        ]
+    analysis["gaps"] = [
+        item for item in analysis.get("gaps", [])
+        if not any(term in str(item.get("gap", "")).lower() for term in location_terms)
+    ]
+
+
+def add_gap_once(analysis, gap):
+    existing = {str(item.get("gap", "")).strip().lower() for item in analysis.get("gaps", []) if isinstance(item, dict)}
+    if str(gap.get("gap", "")).strip().lower() not in existing:
+        analysis.setdefault("gaps", []).append(gap)
+
+
+def apply_match_guardrails(analysis, match_context):
+    location = ((match_context or {}).get("matches") or {}).get("location") or {}
+    status = location.get("status")
+    reason = sanitize_text(location.get("reason"))
+    scorecard = analysis.get("scorecard") or {}
+    workplace = scorecard.get("workplace_fit")
+
+    if status == "compatible":
+        remove_incompatible_location_false_positives(analysis)
+        if isinstance(workplace, dict) and float(workplace.get("score", 3.0) or 3.0) < 4.0:
+            workplace["score"] = 4.0
+            workplace["reason"] = reason or "Structured location check found the role compatible."
+    elif status == "incompatible":
+        blocker = f"Geographic mismatch: {reason}" if reason else "Geographic mismatch"
+        if blocker not in analysis.get("blockers", []):
+            analysis.setdefault("blockers", []).append(blocker)
+        add_gap_once(analysis, {
+            "gap": blocker,
+            "severity": "high",
+            "blocker": True,
+            "mitigation": "",
+        })
+        if isinstance(workplace, dict):
+            workplace["score"] = min(float(workplace.get("score", 3.0) or 3.0), 1.5)
+            workplace["reason"] = reason or "Structured location check found the role incompatible."
+
+    if not analysis.get("tool_match"):
+        analysis["tool_match"] = [
+            {
+                "tool": item.get("tool", ""),
+                "profile_evidence": item.get("profile_evidence", ""),
+                "strength": "direct" if item.get("status") == "direct" else "missing",
+                "importance": "important",
+            }
+            for item in (((match_context or {}).get("matches") or {}).get("technical_tools") or [])[:16]
+        ]
+
+    analysis["match_context"] = match_context
+    analysis["score"] = compute_overall_score(scorecard, analysis.get("blockers", []))
+    analysis["score_5"] = score_100_to_5(analysis["score"])
+    analysis["application_recommendation"] = infer_application_recommendation(analysis["score_5"])
+    analysis["verdict"] = infer_verdict(analysis["score"], analysis.get("blockers", []))
+    if status == "incompatible":
+        analysis["verdict"] = "no"
+        analysis["application_recommendation"] = "do_not_apply"
+    return analysis
+
+
+def calculate_fit(jd_text, system_prompt, api_key, model, job_label=None, profile_text=""):
     """Calls the NVIDIA NIM API to compute job fit."""
+    match_context = build_match_context(jd_text, profile_text)
+    user_content = (
+        "Here is the structured candidate/JD match context. Treat deterministic location compatibility, "
+        "must-have vs nice-to-have grouping, and explicit tool mentions as the source of truth unless the JD text clearly contradicts it:\n\n"
+        f"{format_match_context(match_context)}\n\n"
+        f"Here is the job posting to analyze:\n\n{jd_text}"
+    )
 
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt, "cache_control": {"type": "ephemeral"}},
-            {"role": "user", "content": f"Here is the job posting to analyze:\n\n{jd_text}"}
+            {"role": "user", "content": user_content}
         ],
         "temperature": 0.2,
-        "max_tokens": 2200,
+        "max_tokens": 2600,
         "response_format": {"type": "json_object"}
     }
 
@@ -491,7 +619,7 @@ def calculate_fit(jd_text, system_prompt, api_key, model, job_label=None):
             result = response.json()
             content = result["choices"][0]["message"]["content"]
             parsed = extract_json_payload(content)
-            normalized = normalize_analysis_result(parsed)
+            normalized = apply_match_guardrails(normalize_analysis_result(parsed), match_context)
             if job_label:
                 usage = result.get("usage") or {}
                 cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
@@ -643,6 +771,9 @@ def synthesize_jd_text(record):
     """Builds a usable JD text from a structured payload."""
     responsibilities = record.get("responsibilities") or []
     requirements = record.get("requirements_summary") or []
+    must_have = record.get("must_have_requirements") or requirements
+    nice_to_have = record.get("nice_to_have_requirements") or []
+    technical_tools = record.get("technical_tools_mentioned") or []
     concepts = record.get("jd_concepts") or []
 
     sections = []
@@ -661,11 +792,14 @@ def synthesize_jd_text(record):
     add("Compensation", record.get("compensation"))
     add("Posted datetime", record.get("posted_datetime"))
     add("JD concepts", ", ".join(str(item) for item in concepts if str(item).strip()))
+    add("Technical tools mentioned", ", ".join(str(item) for item in technical_tools if str(item).strip()))
 
     if responsibilities:
         sections.append("Responsibilities:\n" + bullet_lines(responsibilities))
-    if requirements:
-        sections.append("Requirements:\n" + bullet_lines(requirements))
+    if must_have:
+        sections.append("Requirements:\n" + bullet_lines(must_have))
+    if nice_to_have:
+        sections.append("Nice-to-have:\n" + bullet_lines(nice_to_have))
 
     body = record.get("jd_text")
     if body and str(body).strip():
@@ -674,7 +808,7 @@ def synthesize_jd_text(record):
     return "\n\n".join(section for section in sections if section.strip())
 
 
-def process_batch(input_file, output_file, system_prompt, api_key, model, dry_run=False):
+def process_batch(input_file, output_file, system_prompt, api_key, model, dry_run=False, profile_text=""):
     """Processes a JSONL file of structured job postings and writes a JSONL of results."""
     total = 0
     succeeded = 0
@@ -709,7 +843,8 @@ def process_batch(input_file, output_file, system_prompt, api_key, model, dry_ru
                 analysis = {"score": 0, "error": "empty_job_description"}
                 log_progress(f"[batch] {job_label} | empty job description")
             elif dry_run:
-                analysis = normalize_analysis_result({
+                match_context = build_match_context(jd_text, profile_text)
+                analysis = apply_match_guardrails(normalize_analysis_result({
                     "archetype": {"primary": "Simulation", "secondary": ""},
                     "scorecard": {key: {"score": 3.75, "reason": "Mode dry-run"} for key in SCORING_DIMENSIONS},
                     "forces": ["Simulation"],
@@ -717,10 +852,10 @@ def process_batch(input_file, output_file, system_prompt, api_key, model, dry_ru
                     "blockers": [],
                     "verdict": "simulation",
                     "posting_legitimacy": {"assessment": "unknown", "reasoning": ["Mode dry-run"]},
-                })
+                }), match_context)
                 log_progress(f"[batch] {job_label} | dry-run | score={analysis.get('score', 0)}")
             else:
-                analysis = calculate_fit(jd_text, system_prompt, api_key, model, job_label=job_label)
+                analysis = calculate_fit(jd_text, system_prompt, api_key, model, job_label=job_label, profile_text=profile_text)
 
             status = "ok" if not analysis.get("erreur") else "error"
             if status == "ok":
@@ -750,6 +885,9 @@ def process_batch(input_file, output_file, system_prompt, api_key, model, dry_ru
                     "employment_type": record.get("employment_type"),
                     "responsibilities": record.get("responsibilities"),
                     "requirements_summary": record.get("requirements_summary"),
+                    "must_have_requirements": record.get("must_have_requirements"),
+                    "nice_to_have_requirements": record.get("nice_to_have_requirements"),
+                    "technical_tools_mentioned": record.get("technical_tools_mentioned"),
                 },
                 "analysis": analysis
             }
@@ -789,11 +927,12 @@ def main():
     print("📁 Loading profile files...")
     profile_data = load_profile_files(args.profile_dir)
     system_prompt = build_system_prompt(profile_data)
+    profile_text = build_profile_text(profile_data)
 
     if args.jobs_jsonl:
         print(f"📚 Batch analysis: {args.jobs_jsonl}")
         print(f"🧠 NVIDIA model: {args.model}")
-        summary = process_batch(args.jobs_jsonl, args.results_jsonl, system_prompt, api_key, args.model, dry_run=args.dry_run)
+        summary = process_batch(args.jobs_jsonl, args.results_jsonl, system_prompt, api_key, args.model, dry_run=args.dry_run, profile_text=profile_text)
         print(json.dumps(summary, ensure_ascii=False))
         return
 
@@ -824,7 +963,7 @@ def main():
         })
     else:
         print("\n🤖 Calling NVIDIA NIM API...")
-        result = calculate_fit(jd_text, system_prompt, api_key, args.model)
+        result = calculate_fit(jd_text, system_prompt, api_key, args.model, profile_text=profile_text)
 
     display_result(result)
     save_result(jd_text, result, args.output)

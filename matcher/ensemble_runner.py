@@ -8,6 +8,21 @@ import os, sys, json, time, re, argparse, concurrent.futures
 from pathlib import Path
 import requests
 
+try:
+    from matching_intelligence import (
+        build_match_context,
+        build_match_context_from_profile_data,
+        build_profile_text,
+        format_match_context,
+    )
+except ImportError:  # pragma: no cover - package import path
+    from .matching_intelligence import (
+        build_match_context,
+        build_match_context_from_profile_data,
+        build_profile_text,
+        format_match_context,
+    )
+
 BASE_DIR = Path(__file__).parent
 DEFAULT_PROFILE_DIR = "career-ops"
 
@@ -39,6 +54,13 @@ Check C — Explicit must-have requirements with no CV evidence:
 - 1 unmet hard requirement → reduce requirements_coverage by 0.75. Add to gaps with severity: high.
 - Do NOT use transferable skills to satisfy a hard requirement. Example: "3+ years managing eCommerce websites" is NOT satisfied by B2B SaaS experience.
 
+Check D — Geographic eligibility:
+- Use the structured match context supplied with the JD. It was extracted generically from the candidate profile and JD.
+- If matches.location.status is incompatible → cap workplace_fit at 1.5 and add a blocker with the structured reason.
+- If matches.location.status is compatible → do not invent geographic blockers.
+- Do not infer job location from compensation notes. Compensation geography is not the same as work eligibility.
+- Excluded regions only block the candidate if they overlap the candidate's extracted region(s).
+
 === END PRE-SCORING CHECKS ===
 """
 
@@ -58,6 +80,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   },
   "forces": ["...", "...", "..."],
   "faiblesses": ["...", "..."],
+  "tool_match": [{"tool": "...", "profile_evidence": "...", "strength": "direct", "importance": "important"}],
   "blockers": [],
   "verdict": "yes",
   "remarques": "..."
@@ -87,6 +110,7 @@ Return ONLY valid JSON, no markdown, no explanation:
   },
   "forces": ["...", "...", "..."],
   "faiblesses": ["...", "..."],
+  "tool_match": [{"tool": "...", "profile_evidence": "...", "strength": "direct", "importance": "important"}],
   "blockers": [],
   "verdict": "yes",
   "remarques": "..."
@@ -108,13 +132,7 @@ def load_profile(profile_dir):
     return data
 
 
-def build_profile_text(profile_data):
-    return (
-        f"=== IDENTITY ===\n{profile_data.get('profile.yml', '')}\n\n"
-        f"=== TARGET KEYWORDS ===\n{profile_data.get('portals.yml', '')}\n\n"
-        f"=== EXPERIENCE ===\n{profile_data.get('cv.md', '')}\n\n"
-        f"=== APPLICATION STRATEGY ===\n{profile_data.get('_profile.md', '')}"
-    )
+# build_profile_text is imported from matching_intelligence
 
 
 def strip_json(content):
@@ -173,9 +191,76 @@ def infer_recommendation(score_5):
     return "do_not_apply"
 
 
-def ensemble_analyze(jd_text, profile_text, job_label):
+def score_100_to_5(score):
+    return round(max(1.0, min(5.0, 1.0 + (4.0 * float(score) / 100.0))), 1)
+
+
+def remove_location_false_positives(analysis):
+    terms = ("geographic mismatch", "location mismatch", "state exclusion", "country mismatch")
+    for key in ("blockers", "faiblesses"):
+        analysis[key] = [item for item in analysis.get(key, []) if not any(term in str(item).lower() for term in terms)]
+    analysis["gaps"] = [
+        item for item in analysis.get("gaps", [])
+        if not any(term in str(item.get("gap", "")).lower() for term in terms)
+    ]
+
+
+def apply_match_guardrails(analysis, match_context):
+    location = ((match_context or {}).get("matches") or {}).get("location") or {}
+    status = location.get("status")
+    reason = str(location.get("reason") or "").strip()
+    scorecard = analysis.get("scorecard") or {}
+    workplace = scorecard.get("workplace_fit")
+
+    if status == "compatible":
+        remove_location_false_positives(analysis)
+        if isinstance(workplace, dict) and float(workplace.get("score", 3.0) or 3.0) < 4.0:
+            workplace["score"] = 4.0
+            workplace["reason"] = reason or "Structured location check found the role compatible."
+    elif status == "incompatible":
+        blocker = f"Geographic mismatch: {reason}" if reason else "Geographic mismatch"
+        if blocker not in analysis.get("blockers", []):
+            analysis.setdefault("blockers", []).append(blocker)
+        if isinstance(workplace, dict):
+            workplace["score"] = min(float(workplace.get("score", 3.0) or 3.0), 1.5)
+            workplace["reason"] = reason or "Structured location check found the role incompatible."
+        if not any(item.get("gap") == blocker for item in analysis.get("gaps", [])):
+            analysis.setdefault("gaps", []).append({"gap": blocker, "severity": "high", "blocker": True, "mitigation": ""})
+
+    if not analysis.get("tool_match"):
+        analysis["tool_match"] = [
+            {
+                "tool": item.get("tool", ""),
+                "profile_evidence": item.get("profile_evidence", ""),
+                "strength": "direct" if item.get("status") == "direct" else "missing",
+                "importance": "important",
+            }
+            for item in (((match_context or {}).get("matches") or {}).get("technical_tools") or [])[:16]
+        ]
+
+    analysis["match_context"] = match_context
+    analysis["score"] = score_to_100(scorecard)
+    analysis["score_5"] = score_100_to_5(analysis["score"])
+    analysis["application_recommendation"] = infer_recommendation(analysis["score_5"])
+    if analysis.get("blockers"):
+        analysis["verdict"] = "no" if analysis["score"] < 65 else "with_adjustments"
+    if status == "incompatible":
+        analysis["verdict"] = "no"
+        analysis["application_recommendation"] = "do_not_apply"
+    return analysis
+
+
+def ensemble_analyze(jd_text, profile_text, job_label, profile_data=None):
+    if profile_data:
+        match_context = build_match_context_from_profile_data(jd_text, profile_data)
+    else:
+        match_context = build_match_context(jd_text, profile_text)
     system_with_profile = SCORER_SYSTEM + "\n\nCandidate profile:\n" + profile_text
-    user_msg = f"Analyze this job posting:\n\n{jd_text}"
+    user_msg = (
+        "Structured candidate/JD match context:\n\n"
+        f"{format_match_context(match_context)}\n\n"
+        f"Analyze this job posting:\n\n{jd_text}"
+    )
 
     # Phase 1: parallel scoring
     scorer_results = []
@@ -201,7 +286,11 @@ def ensemble_analyze(jd_text, profile_text, job_label):
         analyses_text += f"\n\n--- Analysis {i} ({r['model'].split('/')[-1]}) ---\n"
         analyses_text += json.dumps(r["result"], ensure_ascii=False, indent=2)
 
-    synth_user = f"Job posting:\n\n{jd_text}\n\nIndependent analyses to synthesize:{analyses_text}"
+    synth_user = (
+        "Structured candidate/JD match context:\n\n"
+        f"{format_match_context(match_context)}\n\n"
+        f"Job posting:\n\n{jd_text}\n\nIndependent analyses to synthesize:{analyses_text}"
+    )
     synth_system = SYNTHESIS_SYSTEM + "\n\nCandidate profile:\n" + profile_text
 
     log(f"[ensemble] {job_label} | synthesizing with {SYNTHESIZER.split('/')[-1]}…")
@@ -209,10 +298,10 @@ def ensemble_analyze(jd_text, profile_text, job_label):
     synthesis = strip_json(synth_raw)
     log(f"[ensemble] {job_label} | synthesis done")
 
-    return synthesis
+    return synthesis, match_context
 
 
-def process_batch(input_file, output_file, profile_text):
+def process_batch(input_file, output_file, profile_text, profile_data=None):
     results = []
     total = succeeded = failed = 0
 
@@ -246,7 +335,7 @@ def process_batch(input_file, output_file, profile_text):
             log(f"[ensemble-batch] {job_label} | start | jd_chars={len(jd_text)}")
             t0 = time.time()
             try:
-                synthesis = ensemble_analyze(jd_text, profile_text, job_label)
+                synthesis, match_context = ensemble_analyze(jd_text, profile_text, job_label, profile_data=profile_data)
                 scorecard = synthesis.get("scorecard", {})
                 score_100 = score_to_100(scorecard)
                 score_5 = round(1.0 + (4.0 * score_100 / 100.0), 1)
@@ -262,6 +351,7 @@ def process_batch(input_file, output_file, profile_text):
                     "archetype": synthesis.get("archetype", {}),
                     "role_summary": synthesis.get("role_summary", {}),
                     "scorecard": scorecard,
+                    "tool_match": synthesis.get("tool_match", []),
                     "forces": synthesis.get("forces", []),
                     "faiblesses": synthesis.get("faiblesses", []),
                     "gaps": [{"gap": f, "severity": "medium", "blocker": False, "mitigation": ""} for f in synthesis.get("faiblesses", [])],
@@ -270,6 +360,9 @@ def process_batch(input_file, output_file, profile_text):
                     "remarques": synthesis.get("remarques", ""),
                     "pipeline": "ensemble",
                 }
+                analysis = apply_match_guardrails(analysis, match_context)
+                score_100 = analysis["score"]
+                verdict = analysis["verdict"]
                 row = {
                     "provider": provider,
                     "source_key": source_key,
@@ -315,7 +408,7 @@ def main():
     print(f"📚 Ensemble batch: {args.jobs_jsonl}")
     print(f"🧠 Scorers: {', '.join(s.split('/')[-1] for s in SCORERS)} → {SYNTHESIZER.split('/')[-1]}")
 
-    summary = process_batch(args.jobs_jsonl, args.results_jsonl, profile_text)
+    summary = process_batch(args.jobs_jsonl, args.results_jsonl, profile_text, profile_data=profile_data)
     print(json.dumps(summary, ensure_ascii=False))
 
 
