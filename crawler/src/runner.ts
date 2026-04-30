@@ -109,7 +109,7 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
 
         let emitted = 0;
         for (const job of jobs) {
-          if (minUpdatedAtMs !== undefined && !isFreshEnough(job.updated_at, minUpdatedAtMs)) {
+          if (minUpdatedAtMs !== undefined && !isFreshEnough(job.posted_at ?? job.updated_at, minUpdatedAtMs)) {
             continue;
           }
           const dedupeKey = `${job.provider}:${job.source_key}:${job.job_id}`;

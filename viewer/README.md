@@ -31,9 +31,16 @@ The viewer expects access to the matcher codebase because it can parse job URLs 
 - `PYTHON_BIN`
 - `LOGO_DEV_PUBLISHABLE_KEY`
 - `LOGO_DEV_SECRET_KEY`
+- `DISCORD_WEBHOOK_URL`
+- `SCORE_NOTIFY_MIN_SCORE` (default `4`)
 - `CAREER_OPS_DIR`
 - `NVIDIA_API_KEY`
 - `NVIDIA_MODEL`
+- `SAVED_SEARCH_ANALYZER_ENABLED` (`0` disables the idle saved-search full analyzer)
+- `SAVED_SEARCH_ANALYZER_INTERVAL_MS` (default `60000`)
+- `SAVED_SEARCHES_PATH`
+- `CRAWLER_ACTIVE_LOCK_PATH`
+- `CRAWLER_ACTIVE_LOCK_STALE_MS`
 
 ## API Endpoints
 
@@ -57,3 +64,4 @@ The viewer expects access to the matcher codebase because it can parse job URLs 
 - full-fit analysis with the ensemble pipeline
 - JD data modal backed by the parser API
 - side-panel fit details and rerun controls
+- idle full-fit analysis for saved-search matches, one job at a time, newest first, skipped while the crawler lock is active

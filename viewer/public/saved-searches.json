@@ -1,29 +1,29 @@
 [
   {
-    "id": "saved-product-general",
-    "label": "Product",
-    "title": "product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
-    "location": "remote",
-    "company": "",
-    "sources": [],
-    "days": "7"
-  },
-  {
-    "id": "saved-technical-product",
-    "label": "Technical PM",
+    "id": "tpm-soflo",
+    "label": "TPM, SoFlo",
     "title": "technical product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
     "location": "remote",
     "company": "",
     "sources": [],
-    "days": "7"
+    "days": "1"
   },
   {
-    "id": "saved-ai-product",
-    "label": "AI Product",
-    "title": "(ai,llm,agentic,platform) product (manager,owner,builder)",
+    "id": "pm-soflo",
+    "label": "PM, SoFlo",
+    "title": "product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
     "location": "remote",
     "company": "",
     "sources": [],
-    "days": "14"
+    "days": "1"
+  },
+  {
+    "id": "saved-ai-product",
+    "label": "AI PM",
+    "title": "(ai,llm,agentic,platform) product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
+    "location": "remote",
+    "company": "",
+    "sources": [],
+    "days": "1"
   }
 ]

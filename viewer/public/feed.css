@@ -521,6 +521,10 @@ body {
 .btn:hover { border-color: #a8a29e; }
 .btn-primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .btn-primary:hover { background: #1c1917; border-color: #1c1917; }
+.btn-danger { background: #dc2626; color: #fff; border-color: #dc2626; }
+.btn-danger:hover { background: #b91c1c; border-color: #b91c1c; }
+.btn-success { background: #16a34a; color: #fff; border-color: #16a34a; }
+.btn-success:hover { background: #15803d; border-color: #15803d; }
 .btn-sm { font-size: 11px; padding: 4px 8px; }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--muted); }
 .btn-ghost:hover { color: var(--ink); background: var(--line-2); }

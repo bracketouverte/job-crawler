@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -11,15 +11,34 @@ const DB_PATH = process.env.CATALOG_DB ?? "/app/state/catalog.sqlite";
 const STATE_DIR = process.env.STATE_DIR ?? dirname(DB_PATH);
 const MATCH_RUNS_DIR = process.env.MATCH_RUNS_DIR ?? join(STATE_DIR, "match-runs");
 const ANALYSIS_CACHE_PATH = process.env.ANALYSIS_CACHE_PATH ?? join(STATE_DIR, "job-analysis-cache.json");
+const HIDDEN_JOBS_PATH = process.env.HIDDEN_JOBS_PATH ?? join(STATE_DIR, "hidden-jobs.json");
+const SCORE_NOTIFICATIONS_PATH = process.env.SCORE_NOTIFICATIONS_PATH ?? join(STATE_DIR, "score-notifications.json");
 const MATCHER_DIR = process.env.MATCHER_DIR ?? "/matcher";
 const PYTHON_BIN = process.env.PYTHON_BIN ?? "python3";
 const CAREER_OPS_DIR = process.env.CAREER_OPS_DIR?.trim() ?? "career-ops";
 const LOGO_DEV_PUBLISHABLE_KEY = process.env.LOGO_DEV_PUBLISHABLE_KEY?.trim() ?? "";
 const LOGO_DEV_SECRET_KEY = process.env.LOGO_DEV_SECRET_KEY?.trim() ?? "";
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
+const SAVED_SEARCH_ANALYZER_ENABLED = process.env.SAVED_SEARCH_ANALYZER_ENABLED !== "0";
+const SAVED_SEARCH_ANALYZER_INTERVAL_MS = parseInt(process.env.SAVED_SEARCH_ANALYZER_INTERVAL_MS ?? "60000", 10);
+const SAVED_SEARCHES_PATH = process.env.SAVED_SEARCHES_PATH ?? join(__dirname, "../public/saved-searches.json");
+const CRAWLER_ACTIVE_LOCK_PATH = process.env.CRAWLER_ACTIVE_LOCK_PATH ?? join(STATE_DIR, "crawler-active.lock");
+const CRAWLER_ACTIVE_LOCK_STALE_MS = parseInt(process.env.CRAWLER_ACTIVE_LOCK_STALE_MS ?? "7200000", 10);
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL?.trim() ?? "";
+const SCORE_NOTIFY_MIN_SCORE = parseFloat(process.env.SCORE_NOTIFY_MIN_SCORE ?? "4");
 const LOGO_CACHE_MAX = 2000;
 const logoDevBrandCache = new Map<string, string | null>();
 const activeRunIds = new Set<string>();
+let savedSearchAnalyzerBusy = false;
+let savedSearchAnalyzerPaused = false;
+let savedSearchAnalyzerCurrent: {
+  runId: string;
+  jobKey: string;
+  searchId: string | null;
+  searchLabel: string | null;
+  job: CartJobPayload;
+  startedAt: string;
+} | null = null;
 
 function logoCacheSet(key: string, value: string | null): void {
   if (logoDevBrandCache.size >= LOGO_CACHE_MAX) {
@@ -39,6 +58,7 @@ type JobRow = {
   department: string | null;
   job_url: string | null;
   updated_at: string | null;
+  posted_at: string | null;
   first_seen_at: string;
   last_seen_at: string;
   analysis?: unknown;
@@ -51,6 +71,15 @@ type CachedJobAnalysis = {
 };
 
 type AnalysisCache = Record<string, CachedJobAnalysis>;
+
+type HiddenJobsState = {
+  hidden: string[];
+  updated_at: string;
+};
+
+type ScoreNotificationsState = {
+  sent: Record<string, { score_5: number; notified_at: string; run_id: string }>;
+};
 
 type TitleTokenGroup = {
   terms: string[];
@@ -105,12 +134,36 @@ type ParsedJobPost = {
   provider?: string | null;
 };
 
-const db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
+type SavedSearch = {
+  id?: string;
+  label?: string;
+  title?: string;
+  location?: string;
+  company?: string;
+  days?: string | number;
+  sources?: string[];
+};
+
+const db = new Database(DB_PATH, { fileMustExist: true });
+db.pragma("busy_timeout = 30000");
 const selectJobStatement = db.prepare(
   `SELECT provider, source_key, job_id, title, location, employment_type,
-          compensation, department, job_url, updated_at, first_seen_at, last_seen_at
+          compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
    FROM catalog_jobs
    WHERE provider = ? AND source_key = ? AND job_id = ?`
+);
+const updateParsedMetadataStatement = db.prepare(
+  `UPDATE catalog_jobs
+   SET
+     location = CASE
+       WHEN @location IS NOT NULL AND TRIM(@location) <> '' AND (location IS NULL OR TRIM(location) = '') THEN @location
+       ELSE location
+     END,
+     compensation = CASE
+       WHEN @compensation IS NOT NULL AND TRIM(@compensation) <> '' THEN @compensation
+       ELSE compensation
+     END
+   WHERE provider = @provider AND source_key = @source_key AND job_id = @job_id`
 );
 
 // Returns an array of token groups with exclude flags.
@@ -145,6 +198,77 @@ function parseTitleQuery(input: string): TitleTokenGroup[] {
   return tokens;
 }
 
+function addJobFilterConditions(
+  filters: {
+    title?: string | number | null;
+    location?: string | number | null;
+    company?: string | number | null;
+    sources?: string | string[] | null;
+    days?: string | number | null;
+  },
+): { conditions: string[]; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  const title = String(filters.title ?? "");
+  const location = String(filters.location ?? "");
+  const company = String(filters.company ?? "");
+  const days = String(filters.days ?? "");
+  const sources = Array.isArray(filters.sources) ? filters.sources.join(",") : String(filters.sources ?? "");
+
+  if (title.trim()) {
+    const tokens = parseTitleQuery(title);
+    for (const token of tokens) {
+      if (token.terms.length === 1) {
+        conditions.push(token.exclude ? "LOWER(title) NOT LIKE ?" : "LOWER(title) LIKE ?");
+        params.push(`%${token.terms[0]}%`);
+      } else {
+        if (token.exclude) {
+          const notClauses = token.terms.map(() => "LOWER(title) NOT LIKE ?");
+          conditions.push(`(${notClauses.join(" AND ")})`);
+          for (const t of token.terms) params.push(`%${t}%`);
+        } else {
+          const orClauses = token.terms.map(() => "LOWER(title) LIKE ?");
+          conditions.push(`(${orClauses.join(" OR ")})`);
+          for (const t of token.terms) params.push(`%${t}%`);
+        }
+      }
+    }
+  }
+
+  if (location.trim()) {
+    const locs = location.split(/[,]+/).map((l) => l.trim()).filter(Boolean);
+    const locClauses = locs.map(() => "LOWER(location) LIKE ?");
+    conditions.push(`(${locClauses.join(" OR ")})`);
+    for (const loc of locs) params.push(`%${loc.toLowerCase()}%`);
+  }
+
+  if (company.trim()) {
+    const companies = company.split(/[,]+/).map((c) => c.trim()).filter(Boolean);
+    const companyClauses = companies.map(() => "LOWER(source_key) LIKE ?");
+    conditions.push(`(${companyClauses.join(" OR ")})`);
+    for (const comp of companies) params.push(`%${comp.toLowerCase()}%`);
+  }
+
+  if (sources.trim()) {
+    const providerList = sources.split(/[,]+/).map((s) => s.trim()).filter(Boolean);
+    if (providerList.length > 0) {
+      const providerClauses = providerList.map(() => "provider = ?");
+      conditions.push(`(${providerClauses.join(" OR ")})`);
+      for (const provider of providerList) params.push(provider);
+    }
+  }
+
+  if (days.trim()) {
+    const n = parseInt(days, 10);
+    if (!Number.isNaN(n) && n > 0) {
+      conditions.push("COALESCE(posted_at, first_seen_at) >= datetime('now', ?)");
+      params.push(`-${n} days`);
+    }
+  }
+
+  return { conditions, params };
+}
+
 function companyName(job: Pick<JobRow, "provider" | "source_key">): string {
   if (job.provider === "workday") return job.source_key.split("/")[0] ?? job.source_key;
   return job.source_key;
@@ -152,6 +276,34 @@ function companyName(job: Pick<JobRow, "provider" | "source_key">): string {
 
 function jobCacheKey(job: Pick<JobRow, "provider" | "source_key" | "job_id">): string {
   return `${job.provider}|${job.source_key}|${job.job_id}`;
+}
+
+function isRealCompensation(value: unknown): boolean {
+  const text = String(value ?? "").trim();
+  if (!text) return false;
+  if (/^(req|r|jr|job)[-_]?\d+[a-z0-9-]*$/i.test(text)) return false;
+  if (/^\/?job\//i.test(text)) return false;
+  if (!/(salary|compensation|base pay|pay range|ote|equity|bonus|hour|annual|year|yr|[$€£]|\b\d{2,3}\s?k\b|\b\d{2,3}[,\s]\d{3}\b)/i.test(text)) {
+    return false;
+  }
+  return /[$€£]\s?\d|\b\d{2,3}\s?k\b|\b\d{2,3}[,\s]\d{3}\b|\b\d+\s?-\s?\d+\b/i.test(text);
+}
+
+function sanitizeJob(row: JobRow): JobRow {
+  return {
+    ...row,
+    compensation: isRealCompensation(row.compensation) ? row.compensation : null,
+  };
+}
+
+function hasFullAnalysis(cached: CachedJobAnalysis | undefined): boolean {
+  const analysis = cached?.analysis;
+  return Boolean(
+    analysis &&
+    typeof analysis === "object" &&
+    "pipeline" in analysis &&
+    (analysis as { pipeline?: unknown }).pipeline === "ensemble"
+  );
 }
 
 function matchRunDir(runId: string): string {
@@ -219,9 +371,108 @@ async function writeAnalysisCache(cache: AnalysisCache): Promise<void> {
   await writeFile(ANALYSIS_CACHE_PATH, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
 }
 
+async function readHiddenJobs(): Promise<Set<string>> {
+  try {
+    const raw = await readFile(HIDDEN_JOBS_PATH, "utf8");
+    const parsed = JSON.parse(raw) as Partial<HiddenJobsState>;
+    return new Set(Array.isArray(parsed.hidden) ? parsed.hidden.filter((key): key is string => typeof key === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function writeHiddenJobs(hidden: Set<string>): Promise<void> {
+  await writeFile(
+    HIDDEN_JOBS_PATH,
+    `${JSON.stringify({ hidden: [...hidden].sort(), updated_at: new Date().toISOString() }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+async function readScoreNotifications(): Promise<ScoreNotificationsState> {
+  try {
+    const raw = await readFile(SCORE_NOTIFICATIONS_PATH, "utf8");
+    const parsed = JSON.parse(raw) as Partial<ScoreNotificationsState>;
+    return { sent: parsed.sent && typeof parsed.sent === "object" ? parsed.sent : {} };
+  } catch {
+    return { sent: {} };
+  }
+}
+
+async function writeScoreNotifications(state: ScoreNotificationsState): Promise<void> {
+  await writeFile(SCORE_NOTIFICATIONS_PATH, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+function analysisScore5(analysis: unknown): number | null {
+  if (!analysis || typeof analysis !== "object") return null;
+  const value = (analysis as { score_5?: unknown }).score_5;
+  const score = typeof value === "number" ? value : parseFloat(String(value ?? ""));
+  return Number.isFinite(score) ? score : null;
+}
+
+function analysisRecommendation(analysis: unknown): string {
+  if (!analysis || typeof analysis !== "object") return "n/a";
+  return String((analysis as { application_recommendation?: unknown }).application_recommendation ?? "n/a").replace(/_/g, " ");
+}
+
+async function notifyDiscordForScore(row: Record<string, unknown>, runId: string): Promise<boolean> {
+  if (!DISCORD_WEBHOOK_URL || !Number.isFinite(SCORE_NOTIFY_MIN_SCORE)) {
+    return false;
+  }
+  const analysis = row.analysis;
+  const score = analysisScore5(analysis);
+  if (score === null || score < SCORE_NOTIFY_MIN_SCORE) {
+    return false;
+  }
+  if (typeof row.provider !== "string" || typeof row.source_key !== "string" || typeof row.job_id !== "string") {
+    return false;
+  }
+
+  const key = `${row.provider}|${row.source_key}|${row.job_id}`;
+  const notifications = await readScoreNotifications();
+  if (notifications.sent[key]?.score_5 >= score) {
+    return false;
+  }
+
+  const title = String(row.title ?? "Job");
+  const company = String(row.company ?? row.source_key);
+  const location = String(row.location ?? "");
+  const jobUrl = String(row.job_url ?? row.url ?? "");
+  const content = [
+    `**${score.toFixed(1)}/5 fit** · ${title}`,
+    company,
+    location ? `Location: ${location}` : "",
+    `Recommendation: ${analysisRecommendation(analysis)}`,
+    jobUrl,
+  ].filter(Boolean).join("\n");
+
+  const response = await fetch(DISCORD_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: "Job Scrapper",
+      content,
+      allowed_mentions: { parse: [] },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discord webhook failed with status ${response.status}`);
+  }
+
+  notifications.sent[key] = {
+    score_5: score,
+    notified_at: new Date().toISOString(),
+    run_id: runId,
+  };
+  await writeScoreNotifications(notifications);
+  return true;
+}
+
 async function persistRunResults(runId: string, results: Array<Record<string, unknown>>): Promise<void> {
   const cache = await readAnalysisCache();
   const analyzedAt = new Date().toISOString();
+  const notificationTasks: Array<Promise<boolean>> = [];
 
   for (const row of results) {
     if (row.status !== "ok") continue;
@@ -233,9 +484,16 @@ async function persistRunResults(runId: string, results: Array<Record<string, un
       analyzed_at: analyzedAt,
       run_id: runId,
     };
+    notificationTasks.push(notifyDiscordForScore(row, runId));
   }
 
   await writeAnalysisCache(cache);
+  const sent = await Promise.allSettled(notificationTasks);
+  for (const result of sent) {
+    if (result.status === "rejected") {
+      console.error("score notification error:", result.reason);
+    }
+  }
 }
 
 type RunCommandOptions = {
@@ -349,6 +607,32 @@ async function parseJobPost(url: string): Promise<ParsedJobPost> {
   return JSON.parse(stdout) as ParsedJobPost;
 }
 
+function cleanParsedText(value: unknown): string | null {
+  const text = String(value ?? "").trim().replace(/\s+/g, " ");
+  return text ? text : null;
+}
+
+function persistParsedMetadata(job: JobRow, parsed: ParsedJobPost): void {
+  const location = cleanParsedText(parsed.location);
+  const parsedCompensation = cleanParsedText(parsed.compensation);
+  const compensation = isRealCompensation(parsedCompensation) ? parsedCompensation : null;
+  if (!location && !compensation) {
+    return;
+  }
+
+  try {
+    updateParsedMetadataStatement.run({
+      provider: job.provider,
+      source_key: job.source_key,
+      job_id: job.job_id,
+      location,
+      compensation,
+    });
+  } catch (error) {
+    console.error("persistParsedMetadata error:", error);
+  }
+}
+
 function buildJdText(parsed: ParsedJobPost, job: JobRow): string {
   const responsibilities = Array.isArray(parsed.responsibilities) ? parsed.responsibilities : [];
   const requirements = Array.isArray(parsed.requirements_summary) ? parsed.requirements_summary : [];
@@ -368,8 +652,8 @@ function buildJdText(parsed: ParsedJobPost, job: JobRow): string {
   add("Location", parsed.location ?? job.location);
   add("Employment type", parsed.employment_type ?? job.employment_type);
   add("Workplace type", parsed.workplace_type);
-  add("Compensation", parsed.compensation ?? job.compensation);
-  add("Posted datetime", parsed.posted_datetime ?? job.updated_at ?? job.first_seen_at);
+  add("Compensation", isRealCompensation(parsed.compensation) ? parsed.compensation : sanitizeJob(job).compensation);
+  add("Posted datetime", parsed.posted_datetime ?? job.posted_at ?? job.updated_at ?? job.first_seen_at);
   add("JD concepts", concepts.join(", "));
 
   if (responsibilities.length > 0) {
@@ -403,6 +687,7 @@ async function writeBatchInput(runId: string, jobs: JobRow[], manifest: MatchRun
           runId,
           `[parse] ${jobLabel} | success | provider=${parsed.provider ?? job.provider} title=${parsed.title ?? job.title ?? "n/a"}`,
         );
+        persistParsedMetadata(job, parsed);
       } catch (error) {
         parseError = error instanceof Error ? error.message : String(error);
         failedCount += 1;
@@ -415,16 +700,14 @@ async function writeBatchInput(runId: string, jobs: JobRow[], manifest: MatchRun
     }
 
     const payload = {
-      provider: job.provider,
-      source_key: job.source_key,
-      job_id: job.job_id,
+      ...sanitizeJob(job),
       title: parsed.title ?? job.title,
       company: companyName(job),
       location: parsed.location ?? job.location,
       employment_type: parsed.employment_type ?? job.employment_type,
-      compensation: parsed.compensation ?? job.compensation,
+      compensation: isRealCompensation(parsed.compensation) ? parsed.compensation : sanitizeJob(job).compensation,
       workplace_type: parsed.workplace_type,
-      posted_datetime: parsed.posted_datetime ?? job.updated_at ?? job.first_seen_at,
+      posted_datetime: parsed.posted_datetime ?? job.posted_at ?? job.updated_at ?? job.first_seen_at,
       responsibilities: parsed.responsibilities ?? [],
       requirements_summary: parsed.requirements_summary ?? [],
       jd_concepts: parsed.jd_concepts ?? [],
@@ -532,59 +815,7 @@ app.get("/api/jobs", async (req, res) => {
   const pageSize = 50;
   const offset = (pageNum - 1) * pageSize;
 
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-
-  if (title?.trim()) {
-    const tokens = parseTitleQuery(title);
-    for (const token of tokens) {
-      if (token.terms.length === 1) {
-        conditions.push(token.exclude ? "LOWER(title) NOT LIKE ?" : "LOWER(title) LIKE ?");
-        params.push(`%${token.terms[0]}%`);
-      } else {
-        if (token.exclude) {
-          const notClauses = token.terms.map(() => "LOWER(title) NOT LIKE ?");
-          conditions.push(`(${notClauses.join(" AND ")})`);
-          for (const t of token.terms) params.push(`%${t}%`);
-        } else {
-          const orClauses = token.terms.map(() => "LOWER(title) LIKE ?");
-          conditions.push(`(${orClauses.join(" OR ")})`);
-          for (const t of token.terms) params.push(`%${t}%`);
-        }
-      }
-    }
-  }
-
-  if (location?.trim()) {
-    const locs = location.split(/[,]+/).map((l) => l.trim()).filter(Boolean);
-    const locClauses = locs.map(() => "LOWER(location) LIKE ?");
-    conditions.push(`(${locClauses.join(" OR ")})`);
-    for (const loc of locs) params.push(`%${loc.toLowerCase()}%`);
-  }
-
-  if (company?.trim()) {
-    const companies = company.split(/[,]+/).map((c) => c.trim()).filter(Boolean);
-    const companyClauses = companies.map(() => "LOWER(source_key) LIKE ?");
-    conditions.push(`(${companyClauses.join(" OR ")})`);
-    for (const comp of companies) params.push(`%${comp.toLowerCase()}%`);
-  }
-
-  if (sources?.trim()) {
-    const providerList = sources.split(/[,]+/).map((s) => s.trim()).filter(Boolean);
-    if (providerList.length > 0) {
-      const providerClauses = providerList.map(() => "provider = ?");
-      conditions.push(`(${providerClauses.join(" OR ")})`);
-      for (const provider of providerList) params.push(provider);
-    }
-  }
-
-  if (days?.trim()) {
-    const n = parseInt(days, 10);
-    if (!Number.isNaN(n) && n > 0) {
-      conditions.push("first_seen_at >= datetime('now', ?)");
-      params.push(`-${n} days`);
-    }
-  }
+  const { conditions, params } = addJobFilterConditions({ title, location, company, sources, days });
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -597,15 +828,15 @@ app.get("/api/jobs", async (req, res) => {
     const jobs = db
       .prepare(
         `SELECT provider, source_key, job_id, title, location, employment_type,
-                compensation, department, job_url, updated_at, first_seen_at, last_seen_at
+                compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
          FROM catalog_jobs ${where}
-         ORDER BY first_seen_at DESC
+         ORDER BY COALESCE(posted_at, first_seen_at) DESC
          LIMIT ? OFFSET ?`
       )
       .all(...params, pageSize, offset) as JobRow[];
 
     const enrichedJobs = jobs.map((job) => ({
-      ...job,
+      ...sanitizeJob(job),
       analysis: analysisCache[jobCacheKey(job)]?.analysis ?? null,
     }));
 
@@ -626,7 +857,7 @@ app.get("/api/job", async (req, res) => {
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   try {
     const analysisCache = await readAnalysisCache();
-    res.json({ ...job, analysis: analysisCache[jobCacheKey(job)]?.analysis ?? null });
+    res.json({ ...sanitizeJob(job), analysis: analysisCache[jobCacheKey(job)]?.analysis ?? null });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
@@ -765,6 +996,47 @@ app.get("/api/match-runs/:id/results", async (req, res) => {
   });
 });
 
+app.get("/api/auto-analyzer", (_req, res) => {
+  res.json({
+    enabled: SAVED_SEARCH_ANALYZER_ENABLED,
+    paused: savedSearchAnalyzerPaused,
+    busy: savedSearchAnalyzerBusy,
+    current: savedSearchAnalyzerCurrent,
+  });
+});
+
+app.get("/api/hidden-jobs", async (_req, res) => {
+  const hidden = await readHiddenJobs();
+  res.json({ hidden: [...hidden] });
+});
+
+app.put("/api/hidden-jobs", async (req, res) => {
+  const rawHidden = (req.body as { hidden?: unknown }).hidden;
+  if (!Array.isArray(rawHidden)) {
+    res.status(400).json({ error: "hidden must be an array" });
+    return;
+  }
+  const hidden = new Set(rawHidden.filter((key): key is string => typeof key === "string" && key.trim() !== ""));
+  try {
+    await writeHiddenJobs(hidden);
+    res.json({ hidden: [...hidden] });
+  } catch (error) {
+    console.error("/api/hidden-jobs error:", error);
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/auto-analyzer", (req, res) => {
+  const paused = Boolean((req.body as { paused?: unknown }).paused);
+  savedSearchAnalyzerPaused = paused;
+  res.json({
+    enabled: SAVED_SEARCH_ANALYZER_ENABLED,
+    paused: savedSearchAnalyzerPaused,
+    busy: savedSearchAnalyzerBusy,
+    current: savedSearchAnalyzerCurrent,
+  });
+});
+
 app.get("/api/logo-dev/brand", async (req, res) => {
   if (!LOGO_DEV_SECRET_KEY) {
     res.json({ domain: null });
@@ -825,6 +1097,7 @@ app.get("/api/job-parsed", async (req, res) => {
   }
   try {
     const parsed = await parseJobPost(job.job_url);
+    persistParsedMetadata(job, parsed);
     res.json(parsed);
   } catch (err) {
     console.error("/api/job-parsed error:", err);
@@ -832,7 +1105,132 @@ app.get("/api/job-parsed", async (req, res) => {
   }
 });
 
+async function readSavedSearches(): Promise<SavedSearch[]> {
+  try {
+    const raw = await readFile(SAVED_SEARCHES_PATH, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is SavedSearch => item !== null && typeof item === "object") : [];
+  } catch (error) {
+    console.error("saved-search analyzer: failed to read saved searches:", error);
+    return [];
+  }
+}
+
+async function isCrawlerActive(): Promise<boolean> {
+  try {
+    const info = await stat(CRAWLER_ACTIVE_LOCK_PATH);
+    return Date.now() - info.mtimeMs <= CRAWLER_ACTIVE_LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+async function findNextSavedSearchJob(): Promise<{ job: JobRow; search: SavedSearch } | null> {
+  const searches = await readSavedSearches();
+  if (searches.length === 0) {
+    return null;
+  }
+
+  const analysisCache = await readAnalysisCache();
+  const hiddenJobs = await readHiddenJobs();
+
+  for (const search of searches) {
+    const { conditions, params } = addJobFilterConditions({
+      title: search.title,
+      location: search.location,
+      company: search.company,
+      sources: search.sources,
+      days: search.days,
+    });
+    conditions.push("job_url IS NOT NULL");
+    const where = `WHERE ${conditions.join(" AND ")}`;
+    const jobs = db
+      .prepare(
+        `SELECT provider, source_key, job_id, title, location, employment_type,
+                compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+         FROM catalog_jobs ${where}
+         ORDER BY COALESCE(posted_at, first_seen_at) DESC`
+      )
+      .all(...params) as JobRow[];
+
+    for (const job of jobs) {
+      const key = jobCacheKey(job);
+      if (hiddenJobs.has(key) || hasFullAnalysis(analysisCache[key])) {
+        continue;
+      }
+      return { job, search };
+    }
+  }
+
+  return null;
+}
+
+async function runSavedSearchAnalyzerOnce(): Promise<void> {
+  if (!SAVED_SEARCH_ANALYZER_ENABLED || savedSearchAnalyzerPaused || savedSearchAnalyzerBusy || activeRunIds.size > 0) {
+    return;
+  }
+  if (await isCrawlerActive()) {
+    return;
+  }
+
+  savedSearchAnalyzerBusy = true;
+  try {
+    const next = await findNextSavedSearchJob();
+    if (next === null) {
+      return;
+    }
+
+    const runId = generateRunId();
+    const manifest: MatchRunManifest = {
+      id: runId,
+      status: "queued",
+      created_at: new Date().toISOString(),
+      started_at: null,
+      finished_at: null,
+      job_count: 1,
+      parsed_count: 0,
+      matched_count: 0,
+      failed_count: 0,
+      jobs: [{
+        provider: next.job.provider,
+        source_key: next.job.source_key,
+        job_id: next.job.job_id,
+        title: next.job.title,
+        company: companyName(next.job),
+        location: next.job.location,
+        job_url: next.job.job_url,
+      }],
+      error: null,
+      result_file: null,
+      log_file: matchRunLogPath(runId),
+    };
+
+    console.log(
+      `saved-search analyzer: full analysis start | search=${next.search.id ?? next.search.label ?? "saved-search"} | job=${jobCacheKey(next.job)}`
+    );
+    await writeManifest(manifest);
+    savedSearchAnalyzerCurrent = {
+      runId,
+      jobKey: jobCacheKey(next.job),
+      searchId: next.search.id ?? null,
+      searchLabel: next.search.label ?? null,
+      job: manifest.jobs[0]!,
+      startedAt: manifest.created_at,
+    };
+    await executeMatchRun(runId, [next.job], "ensemble");
+  } catch (error) {
+    console.error("saved-search analyzer error:", error);
+  } finally {
+    savedSearchAnalyzerCurrent = null;
+    savedSearchAnalyzerBusy = false;
+  }
+}
+
 app.listen(PORT, async () => {
   await mkdir(MATCH_RUNS_DIR, { recursive: true });
   console.log(`viewer listening on http://localhost:${PORT}`);
+  if (SAVED_SEARCH_ANALYZER_ENABLED) {
+    setTimeout(() => void runSavedSearchAnalyzerOnce(), 5000);
+    setInterval(() => void runSavedSearchAnalyzerOnce(), SAVED_SEARCH_ANALYZER_INTERVAL_MS);
+  }
 });

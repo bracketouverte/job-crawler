@@ -12,6 +12,10 @@
   let matcherEnabled = false;
   const activeRuns = new Map();         // runId -> { job, mode, startedAt, notifId }
   const activeAnalysisJobs = new Map(); // jobKey -> label (spinner state)
+  let autoAnalyzerNotifId = null;
+  let autoAnalyzerLastJobKey = null;
+  let autoAnalyzerLastActive = false;
+  let autoAnalyzerToastSig = null;
 
   const logoDevBrandDomains = new Map();
   const logoDevBrandLookupsInFlight = new Set();
@@ -111,6 +115,18 @@
   function markVisited(key) {
     visitedJobs.delete(key); visitedJobs.add(key);
     saveSet(VISITED_KEY, new Set([...visitedJobs].slice(-500)));
+  }
+
+  async function syncHiddenJobs() {
+    try {
+      await fetch('/api/hidden-jobs', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden: [...hiddenJobs] })
+      });
+    } catch {
+      // Hiding remains local even if the background analyzer sync is temporarily unavailable.
+    }
   }
 
   /* ── Age badge ───────────────────────────────────────────────── */
@@ -234,6 +250,18 @@
       const compNameHtml = website
         ? `<a class="company-link" href="${esc(website)}" target="_blank" rel="noopener">${compLogoFrame}<span class="company-name">${esc(comp)}</span></a>`
         : `<span style="display:inline-flex;align-items:center;gap:10px;">${compLogoFrame}<span class="company-name">${esc(comp)}</span></span>`;
+      const metaText = (value, max = 40) => {
+        const text = String(value || '').trim();
+        if (!text) return '';
+        const short = text.length > max ? text.slice(0, max - 3) + '…' : text;
+        return short === text ? `<span>${esc(text)}</span>` : `<span title="${esc(text)}">${esc(short)}</span>`;
+      };
+      const cleanCompensation = isRealCompensation(job.compensation) ? job.compensation : null;
+      const salaryRange = extractSalaryRange(cleanCompensation);
+      const jdMeta = [
+        metaText(salaryRange || cleanCompensation, 34),
+        metaText(job.location, 40),
+      ].filter(Boolean).join('<span class="dot"></span>');
 
       const card = document.createElement('article');
       card.className = `job-card${fav ? ' fav' : ''}`;
@@ -248,13 +276,12 @@
                 ? `<a class="job-title js-visit" href="${esc(job.job_url)}" target="_blank" rel="noopener">${esc(job.title ?? '—')}<span class="ext" aria-hidden="true">↗</span></a>${vis ? '<span class="visited-flag">Viewed</span>' : ''}`
                 : `<span class="job-title">${esc(job.title ?? '—')}</span>`}
               <div class="job-meta-row">
-                ${(() => { const loc = (job.location || '—').trim(); const short = loc.length > 40 ? loc.slice(0, 37) + '…' : loc; return short === loc ? `<span>${esc(loc)}</span>` : `<span title="${esc(loc)}">${esc(short)}</span>`; })()}
-                <span class="dot"></span>
+                ${jdMeta ? `${jdMeta}<span class="dot"></span>` : ''}
                 <span class="mode-pill" data-mode="${esc(mode)}"><span class="swatch"></span>${esc(mode)}</span>
                 <span class="dot"></span>
                 <span class="ats-pill">${esc(job.provider || '—')}</span>
                 <span class="dot"></span>
-                ${ageBadgeHtml(job.first_seen_at)}
+                ${ageBadgeHtml(job.posted_at || job.first_seen_at)}
               </div>
             </div>
           </div>
@@ -325,6 +352,7 @@
   function hideJob(key, job) {
     hiddenJobs.add(key);
     saveSet(HIDDEN_KEY, hiddenJobs);
+    syncHiddenJobs();
     lastHidden = { key, job };
     renderCurrentView();
     const nid = pushNotif('neutral', `Hidden "${job.title ?? ''}"`, null, true, 5000);
@@ -334,16 +362,17 @@
     if (!lastHidden) return;
     hiddenJobs.delete(lastHidden.key);
     saveSet(HIDDEN_KEY, hiddenJobs);
+    syncHiddenJobs();
     if (lastHidden._notifId) dismissNotif(lastHidden._notifId);
     lastHidden = null;
     renderCurrentView();
   }
 
   /* ── Notification stack ──────────────────────────────────────── */
-  // pushNotif(kind, title, body, withUndo, autoDismissMs, actions) -> notifId
+  // pushNotif(kind, title, body, withUndo, autoDismissMs, actions, options) -> notifId
   // kind: 'neutral' | 'success' | 'error'
   // actions: optional array of { label, className?, onClick?, autoDismiss?:boolean }
-  function pushNotif(kind, title, body, withUndo, autoDismissMs, actions) {
+  function pushNotif(kind, title, body, withUndo, autoDismissMs, actions, options) {
     const id = ++notifSeq;
     const stack = document.getElementById('notif-stack');
 
@@ -377,11 +406,13 @@
       actionsEl.appendChild(undoBtn);
     }
 
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'notif-close';
-    closeBtn.innerHTML = '✕';
-    closeBtn.addEventListener('click', () => dismissNotif(id));
-    actionsEl.appendChild(closeBtn);
+    if (!options?.hideClose) {
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'notif-close';
+      closeBtn.innerHTML = '✕';
+      closeBtn.addEventListener('click', () => dismissNotif(id));
+      actionsEl.appendChild(closeBtn);
+    }
 
     el.appendChild(textWrap);
     el.appendChild(actionsEl);
@@ -525,8 +556,8 @@
     return { quick: card.querySelector('.js-analyze-quick'), full: card.querySelector('.js-analyze-full') };
   }
 
-  function setMainBtnSpinner(job, label, mode) {
-    activeAnalysisJobs.set(jobKey(job), { label, mode: mode ?? 'maverick' });
+  function setMainBtnSpinner(job, label, mode, source = 'manual') {
+    activeAnalysisJobs.set(jobKey(job), { label, mode: mode ?? 'maverick', source });
     const { quick, full } = getAnalyzeBtns(job);
     if (quick) quick.disabled = true;
     if (full)  full.disabled  = true;
@@ -560,6 +591,91 @@
 
   function modeLabel(mode) { return mode === 'ensemble' ? 'Ensemble pipeline' : 'Preview · Maverick'; }
   function modeDuration(mode) { return mode === 'ensemble' ? '~2 min' : '~20 sec'; }
+
+  function renderAutoAnalyzerToast(status) {
+    const enabled = Boolean(status?.enabled);
+    if (!enabled) return;
+
+    const paused = Boolean(status?.paused);
+    const current = status?.current;
+    const isRunning = Boolean(current);
+    const title = paused
+      ? 'Auto analyze fit paused'
+      : isRunning
+        ? 'Auto analyze fit is running'
+        : 'Auto analyze fit is watching saved searches';
+    const body = isRunning
+      ? `${current.job?.title || 'Job'} · ${current.job?.company || ''}`
+      : paused
+        ? 'Saved-search full analysis is stopped.'
+        : 'Waiting for the next unanalyzed saved-search match.';
+    const sig = JSON.stringify([title, body, paused]);
+    if (autoAnalyzerNotifId && autoAnalyzerToastSig === sig) return;
+
+    if (autoAnalyzerNotifId) dismissNotif(autoAnalyzerNotifId);
+    autoAnalyzerNotifId = pushNotif(
+      'neutral',
+      title,
+      body,
+      false,
+      null,
+      [
+        {
+          label: paused ? 'Resume auto analyze' : 'Stop auto analyze',
+          className: paused ? 'btn btn-success btn-sm' : 'btn btn-danger btn-sm',
+          autoDismiss: false,
+          onClick: async () => {
+            try {
+              await fetch('/api/auto-analyzer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paused: !paused })
+              });
+            } catch {}
+            updateAutoAnalyzerStatus();
+          }
+        }
+      ],
+      { hideClose: true }
+    );
+    autoAnalyzerToastSig = sig;
+  }
+
+  async function updateAutoAnalyzerStatus() {
+    const res = await fetch('/api/auto-analyzer');
+    const status = await res.json();
+    if (!res.ok || !status.enabled) return;
+
+    renderAutoAnalyzerToast(status);
+    const currentKey = status.current?.jobKey || null;
+    const isActive = Boolean(currentKey);
+
+    if (currentKey) {
+      autoAnalyzerLastJobKey = currentKey;
+      const job = allJobs.find(j => jobKey(j) === currentKey);
+      if (job) setMainBtnSpinner(job, 'Analyzing…', 'ensemble', 'auto');
+    } else if (autoAnalyzerLastJobKey) {
+      const state = activeAnalysisJobs.get(autoAnalyzerLastJobKey);
+      if (state?.source === 'auto') {
+        activeAnalysisJobs.delete(autoAnalyzerLastJobKey);
+        if (autoAnalyzerLastActive) fetchJobs(currentPage);
+        else renderCurrentView();
+      }
+      autoAnalyzerLastJobKey = null;
+    }
+
+    autoAnalyzerLastActive = isActive;
+  }
+
+  async function pollAutoAnalyzer() {
+    try {
+      await updateAutoAnalyzerStatus();
+    } catch {
+      // Keep the page usable if the status endpoint is temporarily unavailable.
+    } finally {
+      setTimeout(pollAutoAnalyzer, 5000);
+    }
+  }
 
   async function analyzeJob(job, _triggerEl, mode) {
     const spinnerLabel = mode === 'ensemble' ? 'Analyzing pipeline…' : 'Analyzing…';
@@ -950,8 +1066,17 @@
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeJdModal(); });
 
   // Extract salary numbers from compensation string (display only numbers with currency, no long text)
+  function isRealCompensation(compensation) {
+    const text = String(compensation || '').trim();
+    if (!text) return false;
+    if (/^(req|r|jr|job)[-_]?\d+[a-z0-9-]*$/i.test(text)) return false;
+    if (/^\/?job\//i.test(text)) return false;
+    if (!/(salary|compensation|base pay|pay range|ote|equity|bonus|hour|annual|year|yr|[$€£]|\b\d{2,3}\s?k\b|\b\d{2,3}[,\s]\d{3}\b)/i.test(text)) return false;
+    return /[$€£]\s?\d|\b\d{2,3}\s?k\b|\b\d{2,3}[,\s]\d{3}\b|\b\d+\s?-\s?\d+\b/i.test(text);
+  }
+
   function extractSalaryRange(compensation) {
-    if (!compensation || typeof compensation !== 'string') return null;
+    if (!isRealCompensation(compensation)) return null;
     
     // Detect currency symbol
     const currencyMatch = compensation.match(/[$€£]/);
@@ -996,7 +1121,8 @@
     };
     
     // Extract clean salary range for compensation field
-    const salaryRange = extractSalaryRange(data.compensation);
+    const cleanCompensation = isRealCompensation(data.compensation) ? data.compensation : null;
+    const salaryRange = extractSalaryRange(cleanCompensation);
     
     return [
       field('Title', data.title),
@@ -1004,7 +1130,7 @@
       field('Location', data.location),
       field('Workplace type', data.workplace_type),
       field('Employment type', data.employment_type),
-      salaryRange ? field('Compensation', salaryRange) : field('Compensation', data.compensation),
+      salaryRange ? field('Compensation', salaryRange) : field('Compensation', cleanCompensation),
       field('Posted', data.posted_datetime),
       chips('JD concepts', data.jd_concepts),
       list('Responsibilities', data.responsibilities),
@@ -1030,7 +1156,9 @@
   /* ── Boot ────────────────────────────────────────────────────── */
   loadSources();
   renderFavChips();
+  syncHiddenJobs();
   fetchConfig();
   fetchStats();
   fetchJobs(1);
+  pollAutoAnalyzer();
 })();
