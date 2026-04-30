@@ -301,7 +301,7 @@ def ensemble_analyze(jd_text, profile_text, job_label, profile_data=None):
     return synthesis, match_context
 
 
-def process_batch(input_file, output_file, profile_text, profile_data=None):
+def process_batch(input_file, output_file, profile_text, profile_data=None, pipeline_tag="ensemble"):
     results = []
     total = succeeded = failed = 0
 
@@ -358,7 +358,7 @@ def process_batch(input_file, output_file, profile_text, profile_data=None):
                     "blockers": blockers,
                     "standout_differentiator": synthesis.get("remarques", ""),
                     "remarques": synthesis.get("remarques", ""),
-                    "pipeline": "ensemble",
+                    "pipeline": pipeline_tag,
                 }
                 analysis = apply_match_guardrails(analysis, match_context)
                 score_100 = analysis["score"]
@@ -395,6 +395,7 @@ def main():
     parser.add_argument("--jobs-jsonl", required=True)
     parser.add_argument("--results-jsonl", required=True)
     parser.add_argument("--profile-dir", default=DEFAULT_PROFILE_DIR)
+    parser.add_argument("--pipeline", default="ensemble", help="Pipeline tag written to output (default: ensemble)")
     args = parser.parse_args()
 
     if not API_KEY:
@@ -408,7 +409,7 @@ def main():
     print(f"📚 Ensemble batch: {args.jobs_jsonl}")
     print(f"🧠 Scorers: {', '.join(s.split('/')[-1] for s in SCORERS)} → {SYNTHESIZER.split('/')[-1]}")
 
-    summary = process_batch(args.jobs_jsonl, args.results_jsonl, profile_text, profile_data=profile_data)
+    summary = process_batch(args.jobs_jsonl, args.results_jsonl, profile_text, profile_data=profile_data, pipeline_tag=args.pipeline)
     print(json.dumps(summary, ensure_ascii=False))
 
 

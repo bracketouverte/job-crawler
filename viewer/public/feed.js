@@ -175,35 +175,42 @@
   }
 
   /* ── Footer HTML ─────────────────────────────────────────────── */
-  function footerHtml(job, pipeline) {
-    const jkey     = jobKey(job);
-    const anal     = job.analysis;
-    const score    = Number(anal?.score_5 || 0);
-    const hasAnal  = anal && score > 0;
-    const ranQuick = hasAnal && pipeline !== 'ensemble';
-    const ranFull  = hasAnal && pipeline === 'ensemble';
+  // Pipeline metadata: color, label, CSS class, spark color class
+  const PIPELINES = {
+    'maverick':        { color: '#2563eb', label: 'Quick',         btnClass: 'btn-analyze--quick', spark: 'btn-spark--blue',   dur: '~20s',  swatchClass: 'menu-swatch--maverick' },
+    'ensemble':        { color: '#7c3aed', label: 'Full',          btnClass: 'btn-analyze--full',  spark: 'btn-spark--purple', dur: '~2min', swatchClass: 'menu-swatch--ensemble' },
+    'claude':          { color: '#0d9488', label: 'Claude Quick',  btnClass: 'btn-analyze--claude',     spark: 'btn-spark--teal',   dur: '~25s',  swatchClass: 'menu-swatch--claude' },
+    'claude-ensemble': { color: '#4338ca', label: 'Claude Full',   btnClass: 'btn-analyze--claude-ens', spark: 'btn-spark--indigo', dur: '~2min', swatchClass: 'menu-swatch--claude-ens' },
+  };
 
-    const quickLabel = ranQuick ? 'Quick — Re-run' : 'Quick analyze fit';
-    const fullLabel  = ranFull  ? 'Full — Re-run'  : 'Full analyze fit';
+  function footerHtml(job, pipeline) {
+    const anal    = job.analysis;
+    const score   = Number(anal?.score_5 || 0);
+    const hasAnal = anal && score > 0;
 
     const scoreBadge = (color) => hasAnal ? `
       <button class="btn-score-badge js-open-panel" title="Open analysis details" style="background:${color}">
         ${score.toFixed(1)}<span class="btn-score-badge-max">/5</span>
       </button>` : '';
 
+    const btn = (mode, jsClass) => {
+      const p = PIPELINES[mode];
+      const ran = hasAnal && pipeline === mode;
+      const label = ran ? `${p.label} — Re-run` : `${p.label} analyze`;
+      return `
+      <div class="btn-analyze-wrap">
+        <button class="btn btn-analyze ${p.btnClass} ${jsClass}${ran ? ' ran' : ''}" data-has-anal="${hasAnal}" title="${p.label} analysis · ${p.dur}">
+          <span class="btn-spark ${p.spark}">✦</span> ${esc(label)}
+        </button>
+        ${ran ? scoreBadge(p.color) : ''}
+      </div>`;
+    };
+
     return `
-      <div class="btn-analyze-wrap">
-        <button class="btn btn-analyze btn-analyze--quick js-analyze-quick${ranQuick ? ' ran' : ''}" data-has-anal="${hasAnal}" title="Quick analysis — Maverick, ~20s">
-          <span class="btn-spark btn-spark--blue">✦</span> ${esc(quickLabel)}
-        </button>
-        ${ranQuick ? scoreBadge('#2563eb') : ''}
-      </div>
-      <div class="btn-analyze-wrap">
-        <button class="btn btn-analyze btn-analyze--full js-analyze-full${ranFull ? ' ran' : ''}" data-has-anal="${hasAnal}" title="Full analysis — Ensemble, 3 models, ~2min">
-          <span class="btn-spark btn-spark--purple">✦</span> ${esc(fullLabel)}
-        </button>
-        ${ranFull ? scoreBadge('#7c3aed') : ''}
-      </div>
+      ${btn('maverick', 'js-analyze-quick')}
+      ${btn('ensemble', 'js-analyze-full')}
+      ${btn('claude',   'js-analyze-claude')}
+      ${btn('claude-ensemble', 'js-analyze-claude-ens')}
       <button class="btn btn-ghost js-jd-data" title="Extracted JD data">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> JD data
       </button>
@@ -212,10 +219,12 @@
 
   function bindFooterEvents(footer, job) {
     footer.querySelectorAll('.js-open-panel').forEach(el => el.addEventListener('click', () => openPanel(job, job.analysis)));
-    footer.querySelector('.js-analyze-quick')?.addEventListener('click', () => analyzeJob(job, null, 'maverick'));
-    footer.querySelector('.js-analyze-full')?.addEventListener('click',  () => analyzeJob(job, null, 'ensemble'));
-    footer.querySelector('.js-jd-data')?.addEventListener('click',       () => openJdModal(job));
-    footer.querySelector('.js-hide')?.addEventListener('click',          () => hideJob(jobKey(job), job));
+    footer.querySelector('.js-analyze-quick')?.addEventListener('click',      () => analyzeJob(job, null, 'maverick'));
+    footer.querySelector('.js-analyze-full')?.addEventListener('click',       () => analyzeJob(job, null, 'ensemble'));
+    footer.querySelector('.js-analyze-claude')?.addEventListener('click',     () => analyzeJob(job, null, 'claude'));
+    footer.querySelector('.js-analyze-claude-ens')?.addEventListener('click', () => analyzeJob(job, null, 'claude-ensemble'));
+    footer.querySelector('.js-jd-data')?.addEventListener('click',            () => openJdModal(job));
+    footer.querySelector('.js-hide')?.addEventListener('click',               () => hideJob(jobKey(job), job));
   }
 
   /* ── Recommendation label ────────────────────────────────────── */
@@ -478,9 +487,14 @@
     const tierLabel = tier === 'high' ? 'Strong fit' : tier === 'mid' ? 'Partial fit' : 'Weak fit';
     const pct   = Math.round((score / 5) * 100);
     const pipeline = analysis.pipeline || 'maverick';
-    const pipelineBadge = pipeline === 'ensemble'
-      ? '<span class="pipeline-badge pipeline-ensemble">Ensemble pipeline</span>'
-      : '<span class="pipeline-badge pipeline-maverick">Preview · Maverick</span>';
+    const pipelineBadgeLabels = {
+      maverick: 'Preview · Maverick',
+      ensemble: 'Ensemble pipeline',
+      claude: 'Claude Quick',
+      'claude-ensemble': 'Claude Full',
+    };
+    const pipelineCssClass = { maverick: 'pipeline-maverick', ensemble: 'pipeline-ensemble', claude: 'pipeline-claude', 'claude-ensemble': 'pipeline-claude-ensemble' }[pipeline] || 'pipeline-maverick';
+    const pipelineBadge = `<span class="pipeline-badge ${pipelineCssClass}">${esc(pipelineBadgeLabels[pipeline] || pipeline)}</span>`;
 
     const strengths = Array.isArray(analysis.requirement_match)
       ? analysis.requirement_match.slice(0, 4).map(m => `${m.requirement || '—'}: ${m.profile_evidence || '—'}`)
@@ -499,7 +513,18 @@
         <div class="score-bar"><div class="score-bar-fill" data-tier="${esc(tier)}" style="width:${pct}%"></div></div>
       </section>
       <div class="panel-actions">
-        <button class="btn btn-ghost" id="panel-reanalyze">Re-run analysis</button>
+        <div class="panel-rerun-wrap">
+          <button class="btn btn-ghost" id="panel-reanalyze" data-mode="${pipeline}">Re-run · ${esc(pipelineBadgeLabels[pipeline] || pipeline)}</button>
+          <button class="panel-rerun-caret" id="panel-rerun-caret" title="Choose pipeline">▾</button>
+          <div class="panel-rerun-menu" id="panel-rerun-menu">
+            ${Object.entries(PIPELINES).map(([m, p]) => `
+              <button data-rerun-mode="${m}">
+                <span class="menu-swatch ${p.swatchClass}"></span>
+                <span>${esc(p.label)}</span>
+                <span style="margin-left:auto;opacity:0.5;font-size:10px;">${esc(p.dur)}</span>
+              </button>`).join('')}
+          </div>
+        </div>
         ${job.job_url ? `<a href="${esc(job.job_url)}" target="_blank" rel="noopener" class="btn btn-primary">Apply ↗</a>` : ''}
       </div>
       ${analysis.role_summary?.tldr ? `
@@ -535,9 +560,31 @@
     `;
 
     document.getElementById('panel-footer').innerHTML = '';
+
+    // Re-run main button uses same pipeline as the current analysis
     document.getElementById('panel-reanalyze')?.addEventListener('click', () => {
       closePanel();
-      analyzeJob(job, null, 'maverick');
+      analyzeJob(job, null, pipeline);
+    });
+
+    // Caret toggles dropdown
+    const caretBtn = document.getElementById('panel-rerun-caret');
+    const menu     = document.getElementById('panel-rerun-menu');
+    caretBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu?.classList.toggle('open');
+    });
+    // Close on outside click
+    document.addEventListener('click', () => menu?.classList.remove('open'), { once: true });
+
+    // Dropdown items
+    menu?.querySelectorAll('[data-rerun-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const m = btn.dataset.rerunMode;
+        menu.classList.remove('open');
+        closePanel();
+        analyzeJob(job, null, m);
+      });
     });
 
     document.getElementById('panel-overlay').classList.add('open');
@@ -550,20 +597,22 @@
   }
 
   /* ── Analyze ─────────────────────────────────────────────────── */
-  function getAnalyzeBtns(job) {
-    const card = document.querySelector(`.job-card[data-key="${CSS.escape(jobKey(job))}"]`);
-    if (!card) return { quick: null, full: null };
-    return { quick: card.querySelector('.js-analyze-quick'), full: card.querySelector('.js-analyze-full') };
-  }
+  const MODE_BTN_CLASS = {
+    'maverick':        'js-analyze-quick',
+    'ensemble':        'js-analyze-full',
+    'claude':          'js-analyze-claude',
+    'claude-ensemble': 'js-analyze-claude-ens',
+  };
 
   function setMainBtnSpinner(job, label, mode, source = 'manual') {
     activeAnalysisJobs.set(jobKey(job), { label, mode: mode ?? 'maverick', source });
-    const { quick, full } = getAnalyzeBtns(job);
-    if (quick) quick.disabled = true;
-    if (full)  full.disabled  = true;
-    const spinner = `<span class="btn-spinner"></span> ${label}`;
-    if (mode === 'ensemble') { if (full)  full.innerHTML  = spinner; }
-    else                     { if (quick) quick.innerHTML = spinner; }
+    const card = document.querySelector(`.job-card[data-key="${CSS.escape(jobKey(job))}"]`);
+    if (!card) return;
+    // Disable all analyze buttons while running
+    card.querySelectorAll('.btn-analyze').forEach(b => { b.disabled = true; });
+    const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-quick';
+    const activeBtn = card.querySelector(`.${jsClass}`);
+    if (activeBtn) activeBtn.innerHTML = `<span class="btn-spinner"></span> ${label}`;
   }
 
   function restoreMainBtn(job) {
@@ -579,18 +628,20 @@
     for (const [jkey, { label, mode }] of activeAnalysisJobs) {
       const card = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"]`);
       if (!card) continue;
-      const quick = card.querySelector('.js-analyze-quick');
-      const full  = card.querySelector('.js-analyze-full');
-      if (quick) quick.disabled = true;
-      if (full)  full.disabled  = true;
-      const spinner = `<span class="btn-spinner"></span> ${label}`;
-      if (mode === 'ensemble') { if (full)  full.innerHTML  = spinner; }
-      else                     { if (quick) quick.innerHTML = spinner; }
+      card.querySelectorAll('.btn-analyze').forEach(b => { b.disabled = true; });
+      const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-quick';
+      const activeBtn = card.querySelector(`.${jsClass}`);
+      if (activeBtn) activeBtn.innerHTML = `<span class="btn-spinner"></span> ${label}`;
     }
   }
 
-  function modeLabel(mode) { return mode === 'ensemble' ? 'Ensemble pipeline' : 'Preview · Maverick'; }
-  function modeDuration(mode) { return mode === 'ensemble' ? '~2 min' : '~20 sec'; }
+  function modeLabel(mode) {
+    const labels = { maverick: 'Preview · Maverick', ensemble: 'Ensemble pipeline', claude: 'Claude Quick', 'claude-ensemble': 'Claude Full' };
+    return labels[mode] || mode;
+  }
+  function modeDuration(mode) {
+    return (mode === 'ensemble' || mode === 'claude-ensemble') ? '~2 min' : '~25 sec';
+  }
 
   function renderAutoAnalyzerToast(status) {
     const enabled = Boolean(status?.enabled);

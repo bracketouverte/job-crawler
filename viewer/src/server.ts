@@ -130,6 +130,9 @@ type ParsedJobPost = {
   employment_type?: string | null;
   responsibilities?: string[];
   requirements_summary?: string[];
+  must_have_requirements?: string[];
+  nice_to_have_requirements?: string[];
+  technical_tools_mentioned?: string[];
   url?: string | null;
   provider?: string | null;
 };
@@ -704,6 +707,9 @@ function persistParsedMetadata(job: JobRow, parsed: ParsedJobPost): void {
 function buildJdText(parsed: ParsedJobPost, job: JobRow): string {
   const responsibilities = Array.isArray(parsed.responsibilities) ? parsed.responsibilities : [];
   const requirements = Array.isArray(parsed.requirements_summary) ? parsed.requirements_summary : [];
+  const mustHave = Array.isArray(parsed.must_have_requirements) ? parsed.must_have_requirements : requirements;
+  const niceToHave = Array.isArray(parsed.nice_to_have_requirements) ? parsed.nice_to_have_requirements : [];
+  const technicalTools = Array.isArray(parsed.technical_tools_mentioned) ? parsed.technical_tools_mentioned : [];
   const concepts = Array.isArray(parsed.jd_concepts) ? parsed.jd_concepts : [];
 
   const sections: string[] = [];
@@ -723,12 +729,16 @@ function buildJdText(parsed: ParsedJobPost, job: JobRow): string {
   add("Compensation", isRealCompensation(parsed.compensation) ? parsed.compensation : sanitizeJob(job).compensation);
   add("Posted datetime", parsed.posted_datetime ?? job.posted_at ?? job.updated_at ?? job.first_seen_at);
   add("JD concepts", concepts.join(", "));
+  add("Technical tools mentioned", technicalTools.join(", "));
 
   if (responsibilities.length > 0) {
     sections.push(`Responsibilities:\n${responsibilities.map((item) => `- ${item}`).join("\n")}`);
   }
-  if (requirements.length > 0) {
-    sections.push(`Requirements:\n${requirements.map((item) => `- ${item}`).join("\n")}`);
+  if (mustHave.length > 0) {
+    sections.push(`Requirements:\n${mustHave.map((item) => `- ${item}`).join("\n")}`);
+  }
+  if (niceToHave.length > 0) {
+    sections.push(`Nice-to-have:\n${niceToHave.map((item) => `- ${item}`).join("\n")}`);
   }
 
   return sections.join("\n\n");
@@ -778,6 +788,9 @@ async function writeBatchInput(runId: string, jobs: JobRow[], manifest: MatchRun
       posted_datetime: parsed.posted_datetime ?? job.posted_at ?? job.updated_at ?? job.first_seen_at,
       responsibilities: parsed.responsibilities ?? [],
       requirements_summary: parsed.requirements_summary ?? [],
+      must_have_requirements: parsed.must_have_requirements ?? parsed.requirements_summary ?? [],
+      nice_to_have_requirements: parsed.nice_to_have_requirements ?? [],
+      technical_tools_mentioned: parsed.technical_tools_mentioned ?? [],
       jd_concepts: parsed.jd_concepts ?? [],
       job_url: job.job_url,
       url: job.job_url,
@@ -814,9 +827,17 @@ async function executeMatchRun(runId: string, jobs: JobRow[], mode?: string): Pr
     const preparedManifest = await writeBatchInput(runId, jobs, runningManifest);
     await writeManifest(preparedManifest);
 
-    const script = mode === "ensemble"
+    const isEnsemble = mode === "ensemble" || mode === "claude-ensemble";
+    const script = isEnsemble
       ? join(MATCHER_DIR, "ensemble_runner.py")
       : join(MATCHER_DIR, "job_fit_analyzer.py");
+
+    // Pipeline tag controls what's written to analysis.pipeline in output.
+    // claude / claude-ensemble = new structured pre-extraction pipeline (this branch).
+    // maverick / ensemble      = original single-pass pipeline.
+    const pipelineTag = (mode === "claude" || mode === "claude-ensemble")
+      ? mode
+      : isEnsemble ? "ensemble" : "maverick";
 
     await runCommand(
       PYTHON_BIN,
@@ -828,6 +849,8 @@ async function executeMatchRun(runId: string, jobs: JobRow[], mode?: string): Pr
         matchRunResultsPath(runId),
         "--profile-dir",
         join(MATCHER_DIR, CAREER_OPS_DIR),
+        "--pipeline",
+        pipelineTag,
       ],
       {
         env: process.env,

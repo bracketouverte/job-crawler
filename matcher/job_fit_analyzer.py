@@ -511,7 +511,7 @@ def normalize_analysis_result(result):
             "reasoning": legitimacy_reasoning,
         },
         "remarques": remarks,
-        "pipeline": "maverick",
+        "pipeline": result.get("_pipeline_tag", "maverick"),
     }
 
 
@@ -582,7 +582,7 @@ def apply_match_guardrails(analysis, match_context):
     return analysis
 
 
-def calculate_fit(jd_text, system_prompt, api_key, model, job_label=None, profile_text=""):
+def calculate_fit(jd_text, system_prompt, api_key, model, job_label=None, profile_text="", pipeline_tag="maverick"):
     """Calls the NVIDIA NIM API to compute job fit."""
     match_context = build_match_context(jd_text, profile_text)
     user_content = (
@@ -619,6 +619,7 @@ def calculate_fit(jd_text, system_prompt, api_key, model, job_label=None, profil
             result = response.json()
             content = result["choices"][0]["message"]["content"]
             parsed = extract_json_payload(content)
+            parsed["_pipeline_tag"] = pipeline_tag
             normalized = apply_match_guardrails(normalize_analysis_result(parsed), match_context)
             if job_label:
                 usage = result.get("usage") or {}
@@ -808,7 +809,7 @@ def synthesize_jd_text(record):
     return "\n\n".join(section for section in sections if section.strip())
 
 
-def process_batch(input_file, output_file, system_prompt, api_key, model, dry_run=False, profile_text=""):
+def process_batch(input_file, output_file, system_prompt, api_key, model, dry_run=False, profile_text="", pipeline_tag="maverick"):
     """Processes a JSONL file of structured job postings and writes a JSONL of results."""
     total = 0
     succeeded = 0
@@ -855,7 +856,7 @@ def process_batch(input_file, output_file, system_prompt, api_key, model, dry_ru
                 }), match_context)
                 log_progress(f"[batch] {job_label} | dry-run | score={analysis.get('score', 0)}")
             else:
-                analysis = calculate_fit(jd_text, system_prompt, api_key, model, job_label=job_label, profile_text=profile_text)
+                analysis = calculate_fit(jd_text, system_prompt, api_key, model, job_label=job_label, profile_text=profile_text, pipeline_tag=pipeline_tag)
 
             status = "ok" if not analysis.get("erreur") else "error"
             if status == "ok":
@@ -907,6 +908,7 @@ def main():
     parser.add_argument("-p", "--profile-dir", default=DEFAULT_PROFILE_DIR, help=f"Directory containing profile files (default: {DEFAULT_PROFILE_DIR})")
     parser.add_argument("--model", default=os.environ.get("NVIDIA_MODEL", DEFAULT_MODEL), help=f"Modele NVIDIA NIM (defaut: {DEFAULT_MODEL})")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without API call")
+    parser.add_argument("--pipeline", default="maverick", help="Pipeline tag written to output (default: maverick)")
 
     args = parser.parse_args()
 
@@ -932,7 +934,7 @@ def main():
     if args.jobs_jsonl:
         print(f"📚 Batch analysis: {args.jobs_jsonl}")
         print(f"🧠 NVIDIA model: {args.model}")
-        summary = process_batch(args.jobs_jsonl, args.results_jsonl, system_prompt, api_key, args.model, dry_run=args.dry_run, profile_text=profile_text)
+        summary = process_batch(args.jobs_jsonl, args.results_jsonl, system_prompt, api_key, args.model, dry_run=args.dry_run, profile_text=profile_text, pipeline_tag=args.pipeline)
         print(json.dumps(summary, ensure_ascii=False))
         return
 
