@@ -218,6 +218,19 @@
       ${btn('claude-ensemble', 'js-analyze-claude-ens')}
       ${btn('codex',          'js-analyze-codex')}
       ${btn('codex-ensemble', 'js-analyze-codex-ens')}
+      <button class="btn btn-ghost js-run-multi-toggle" title="Run multiple pipelines at once">▾ Multi-run</button>
+      <div class="multi-run-panel" style="display:none;">
+        <div class="multi-run-checks">
+          ${Object.entries(PIPELINES).map(([mode, p]) => `
+            <label class="multi-run-check" style="--chip-color:${p.color};">
+              <input type="checkbox" class="js-multi-check" data-mode="${esc(mode)}">
+              <span class="multi-run-dot" style="background:${p.color};"></span>
+              <span>${esc(p.label)}</span>
+              <span class="multi-run-dur">${esc(p.dur)}</span>
+            </label>`).join('')}
+        </div>
+        <button class="btn btn-ghost js-run-selected" disabled>Run selected</button>
+      </div>
       <button class="btn btn-ghost js-jd-data" title="Extracted JD data">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> JD data
       </button>
@@ -237,6 +250,32 @@
     footer.querySelector('.js-analyze-claude-ens')?.addEventListener('click', () => analyzeJob(job, null, 'claude-ensemble'));
     footer.querySelector('.js-analyze-codex')?.addEventListener('click',      () => analyzeJob(job, null, 'codex'));
     footer.querySelector('.js-analyze-codex-ens')?.addEventListener('click',  () => analyzeJob(job, null, 'codex-ensemble'));
+
+    // Multi-run toggle
+    const multiToggle = footer.querySelector('.js-run-multi-toggle');
+    const multiPanel  = footer.querySelector('.multi-run-panel');
+    const runSelected = footer.querySelector('.js-run-selected');
+    if (multiToggle && multiPanel) {
+      multiToggle.addEventListener('click', () => {
+        const open = multiPanel.style.display !== 'none';
+        multiPanel.style.display = open ? 'none' : 'flex';
+        multiToggle.classList.toggle('active', !open);
+      });
+      multiPanel.querySelectorAll('.js-multi-check').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const anyChecked = [...multiPanel.querySelectorAll('.js-multi-check')].some(c => c.checked);
+          runSelected.disabled = !anyChecked;
+        });
+      });
+      runSelected.addEventListener('click', () => {
+        const modes = [...multiPanel.querySelectorAll('.js-multi-check:checked')].map(c => c.dataset.mode);
+        if (!modes.length) return;
+        multiPanel.style.display = 'none';
+        multiToggle.classList.remove('active');
+        for (const mode of modes) analyzeJob(job, null, mode);
+      });
+    }
+
     footer.querySelector('.js-jd-data')?.addEventListener('click',            () => openJdModal(job));
     footer.querySelector('.js-hide')?.addEventListener('click',               () => hideJob(jobKey(job), job));
   }
@@ -671,20 +710,37 @@
     'codex-ensemble':  'js-analyze-codex-ens',
   };
 
+  // activeAnalysisJobs is keyed by `jobKey|mode` to support concurrent pipelines per job
+  function activeJobRunKey(job, mode) { return `${jobKey(job)}|${mode ?? 'maverick'}`; }
+  function jobHasActiveRuns(job) {
+    const prefix = jobKey(job) + '|';
+    for (const k of activeAnalysisJobs.keys()) { if (k.startsWith(prefix)) return true; }
+    return false;
+  }
+
   function setMainBtnSpinner(job, label, mode, source = 'manual') {
-    activeAnalysisJobs.set(jobKey(job), { label, mode: mode ?? 'maverick', source });
+    activeAnalysisJobs.set(activeJobRunKey(job, mode), { label, mode: mode ?? 'maverick', source });
     const card = document.querySelector(`.job-card[data-key="${CSS.escape(jobKey(job))}"]`);
     if (!card) return;
-    // Disable all analyze buttons while running
     card.querySelectorAll('.btn-analyze').forEach(b => { b.disabled = true; });
     const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-quick';
     const activeBtn = card.querySelector(`.${jsClass}`);
     if (activeBtn) activeBtn.innerHTML = `<span class="btn-spinner"></span> ${label}`;
   }
 
-  function restoreMainBtn(job) {
+  function restoreMainBtn(job, mode) {
     const jkey = jobKey(job);
-    activeAnalysisJobs.delete(jkey);
+    activeAnalysisJobs.delete(activeJobRunKey(job, mode));
+    // Only re-render footer when no more active runs for this job
+    if (jobHasActiveRuns(job)) {
+      // Still running other pipelines — just re-enable the button that just finished
+      const card = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"]`);
+      if (!card) return;
+      const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-quick';
+      const btn = card.querySelector(`.${jsClass}`);
+      if (btn) { btn.disabled = false; btn.innerHTML = `<span class="btn-spark ${PIPELINES[mode]?.spark || ''}">✦</span> ${PIPELINES[mode]?.label || mode} analyze`; }
+      return;
+    }
     const footer = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"] .job-footer`);
     if (!footer) return;
     footer.innerHTML = footerHtml(job);
@@ -692,7 +748,8 @@
   }
 
   function reapplySpinners() {
-    for (const [jkey, { label, mode }] of activeAnalysisJobs) {
+    for (const [runKey, { label, mode }] of activeAnalysisJobs) {
+      const jkey = runKey.split('|').slice(0, 3).join('|'); // provider|source_key|job_id
       const card = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"]`);
       if (!card) continue;
       card.querySelectorAll('.btn-analyze').forEach(b => { b.disabled = true; });
@@ -814,8 +871,8 @@
       activeRuns.set(data.run_id, { job, mode, startedAt: Date.now(), notifId });
       scheduleRunPoll(data.run_id);
     } catch (e) {
-      activeAnalysisJobs.delete(jobKey(job));
-      restoreMainBtn(job);
+      activeAnalysisJobs.delete(activeJobRunKey(job, mode));
+      restoreMainBtn(job, mode);
       dismissNotif(notifId);
       pushNotif('error', `Failed · ${job.title ?? 'Job'} · ${comp}`, e.message || 'Analysis failed', false, null);
     }
@@ -836,7 +893,7 @@
 
       if (run.status === 'completed' || run.status === 'failed') {
         activeRuns.delete(runId);
-        activeAnalysisJobs.delete(jobKey(job));
+        activeAnalysisJobs.delete(activeJobRunKey(job, mode));
         dismissNotif(notifId);
 
         const elapsed = Math.round((Date.now() - startedAt) / 1000);
@@ -844,7 +901,7 @@
         const comp    = companyName(job);
 
         if (run.status === 'failed') {
-          restoreMainBtn(job);
+          restoreMainBtn(job, mode);
           pushNotif('error', `Failed · ${job.title ?? 'Job'} · ${comp}`, `${modeLabel(mode)} · ${durStr}`, false, null);
           return;
         }
@@ -852,7 +909,7 @@
         // Fetch the updated job and patch the card
         const params = new URLSearchParams({ provider: job.provider, source_key: job.source_key, job_id: job.job_id });
         const jobRes = await fetch(`/api/job?${params}`);
-        if (!jobRes.ok) { restoreMainBtn(job); return; }
+        if (!jobRes.ok) { restoreMainBtn(job, mode); return; }
 
         const updatedJob = await jobRes.json();
         const idx = allJobs.findIndex(j => jobKey(j) === jobKey(job));
@@ -866,6 +923,8 @@
           if (footer) {
             footer.innerHTML = footerHtml(updatedJob);
             bindFooterEvents(footer, updatedJob);
+            // Re-apply spinners for any pipelines still running on this job
+            reapplySpinners();
           }
 
           // If panel is open for this job, refresh it with the new pipeline data
