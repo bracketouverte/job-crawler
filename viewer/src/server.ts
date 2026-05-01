@@ -519,9 +519,11 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
   const tldr   = roleSummary.tldr   ? String(roleSummary.tldr)   : null;
   const domain = roleSummary.domain ? String(roleSummary.domain) : null;
   const embed = {
+    ...(companyUrl ? { author: { name: companyUrl, url: `https://${companyUrl}` } } : {}),
     title,
     url: jobUrl || undefined,
     color: 3066993,
+    ...(tldr ? { description: tldr } : {}),
     ...(thumbnailUrl ? { thumbnail: { url: thumbnailUrl } } : {}),
     fields: [
       { name: "Score", value: `${score.toFixed(1)}/5`, inline: true },
@@ -531,9 +533,7 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
       { name: "Compensation", value: jobCompensation(row.compensation as string | null | undefined), inline: true },
       ...(domain ? [{ name: "Domain", value: domain, inline: true }] : []),
       { name: "Decision", value: decisionEmoji(score), inline: false },
-      ...(tldr ? [{ name: "Role", value: tldr, inline: false }] : []),
     ],
-    ...(companyUrl ? { footer: { text: companyUrl } } : {}),
   };
 
   const response = await fetch(DISCORD_WEBHOOK_URL, {
