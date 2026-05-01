@@ -23,6 +23,7 @@ export type RunOptions = {
   providerConcurrency: Partial<Record<Provider, number>>;
   timeoutMs: number;
   retries: number;
+  progressFile?: string;
 };
 
 type WorkItem = {
@@ -74,10 +75,10 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
     : Date.now() - options.maxAgeHours * 60 * 60 * 1000;
   const startedMs = Date.now();
   const progressTimer = options.progressEveryMs > 0
-    ? setInterval(() => logProgress("progress", startedMs, completed, items.length, stats, failures.length), options.progressEveryMs)
+    ? setInterval(() => logProgress("progress", startedMs, completed, items.length, stats, failures.length, options.progressFile), options.progressEveryMs)
     : undefined;
 
-  logProgress("start", startedMs, completed, items.length, stats, failures.length);
+  logProgress("start", startedMs, completed, items.length, stats, failures.length, options.progressFile);
 
   async function worker(): Promise<void> {
     while (true) {
@@ -161,7 +162,7 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
   };
 
   await writeFile(options.reportFile, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-  logProgress("done", startedMs, completed, items.length, stats, failures.length);
+  logProgress("done", startedMs, completed, items.length, stats, failures.length, options.progressFile);
   return report;
 }
 
@@ -385,7 +386,8 @@ function logProgress(
   completed: number,
   total: number,
   stats: Record<Provider, ProviderStats>,
-  failureCount: number
+  failureCount: number,
+  progressFile?: string
 ): void {
   const elapsedSeconds = Math.round((Date.now() - startedMs) / 1000);
   const percent = total === 0 ? 100 : Math.round((completed / total) * 100);
@@ -402,7 +404,7 @@ function logProgress(
     })
   );
 
-  console.log(JSON.stringify({
+  const payload = {
     event,
     elapsed_seconds: elapsedSeconds,
     completed_sources: completed,
@@ -413,5 +415,11 @@ function logProgress(
     total_jobs: jobs,
     failures_recorded: failureCount,
     by_provider: byProvider
-  }));
+  };
+
+  console.log(JSON.stringify(payload));
+
+  if (progressFile) {
+    writeFile(progressFile, `${JSON.stringify(payload)}\n`, "utf8").catch(() => undefined);
+  }
 }

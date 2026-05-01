@@ -778,6 +778,75 @@
     }
   }
 
+  /* ── Crawl status indicator ─────────────────────────────────── */
+  function formatElapsed(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  }
+
+  function formatNextRun(isoString) {
+    if (!isoString) return '';
+    const d = new Date(isoString);
+    const now = new Date();
+    const diffMs = d - now;
+    if (diffMs <= 0) return 'soon';
+    const diffMin = Math.round(diffMs / 60000);
+    if (diffMin < 60) return `in ${diffMin}m`;
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    return m > 0 ? `in ${h}h ${m}m` : `in ${h}h`;
+  }
+
+  async function updateCrawlStatus() {
+    const indicator = document.getElementById('crawl-indicator');
+    const popover   = document.getElementById('crawl-popover');
+    const fill      = document.getElementById('crawl-bar-fill');
+    const pctEl     = document.getElementById('crawl-bar-pct');
+    if (!indicator || !popover || !fill || !pctEl) return;
+
+    const res = await fetch('/api/crawl-status');
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (!data.active) {
+      indicator.classList.remove('active');
+      if (data.total_jobs) {
+        fill.style.width = '100%';
+        pctEl.textContent = '100%';
+      }
+      const nextLabel = data.next_run ? `Next crawl ${formatNextRun(data.next_run)}` : '';
+      popover.textContent = nextLabel;
+      indicator.dataset.nextRun = nextLabel;
+      return;
+    }
+
+    indicator.classList.add('active');
+    delete indicator.dataset.nextRun;
+
+    const p         = data.progress;
+    const percent   = p ? (p.percent ?? 0) : 0;
+    const totalJobs = p ? (p.total_jobs ?? 0) : 0;
+    const elapsed   = p ? (p.elapsed_seconds ?? 0) : 0;
+
+    fill.style.width  = `${percent}%`;
+    pctEl.textContent = `${percent}%`;
+
+    popover.innerHTML =
+      `<strong>${totalJobs.toLocaleString()} jobs</strong> · ${formatElapsed(elapsed)}`;
+  }
+
+  async function pollCrawlStatus() {
+    try {
+      await updateCrawlStatus();
+    } catch {
+      // non-fatal
+    } finally {
+      setTimeout(pollCrawlStatus, 3000);
+    }
+  }
+
   async function analyzeJob(job, _triggerEl, mode) {
     const spinnerLabel = mode === 'claude-ensemble' ? 'Analyzing pipeline…' : 'Analyzing…';
     setMainBtnSpinner(job, spinnerLabel, mode);
@@ -1375,6 +1444,7 @@
   fetchStats();
   fetchJobs(bootPage);
   pollAutoAnalyzer();
+  pollCrawlStatus();
 
   window.addEventListener('popstate', () => {
     const page = restoreFromUrl();

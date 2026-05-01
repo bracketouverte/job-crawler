@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { unlink } from "node:fs/promises";
 import { runCrawler } from "./runner.js";
 import { parseProviderList } from "./source-loader.js";
 import type { Provider } from "./types.js";
@@ -19,6 +20,7 @@ type CliOptions = {
   providerConcurrency: Partial<Record<Provider, number>>;
   timeoutMs: number;
   retries: number;
+  progressFile: string;
 };
 
 const defaults: CliOptions = {
@@ -31,7 +33,8 @@ const defaults: CliOptions = {
   progressEveryMs: 10000,
   providerConcurrency: { ashby: 2 },
   timeoutMs: 15000,
-  retries: 2
+  retries: 2,
+  progressFile: "/app/state/crawler-progress.json",
 };
 
 async function main(): Promise<void> {
@@ -53,8 +56,11 @@ async function main(): Promise<void> {
     progressEveryMs: options.progressEveryMs,
     providerConcurrency: options.providerConcurrency,
     timeoutMs: options.timeoutMs,
-    retries: options.retries
+    retries: options.retries,
+    progressFile: options.progressFile,
   });
+
+  await unlink(options.progressFile).catch(() => undefined);
 
   console.log(JSON.stringify({
     started_at: report.started_at,
@@ -140,6 +146,10 @@ export function parseArgs(args: string[]): CliOptions {
         break;
       case "--retries":
         options.retries = parseNonNegativeInteger(arg, requireValue(arg, next));
+        index += 1;
+        break;
+      case "--progress-file":
+        options.progressFile = requireValue(arg, next);
         index += 1;
         break;
       default:

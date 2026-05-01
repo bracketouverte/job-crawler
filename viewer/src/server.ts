@@ -24,6 +24,7 @@ const SAVED_SEARCH_ANALYZER_INTERVAL_MS = parseInt(process.env.SAVED_SEARCH_ANAL
 const SAVED_SEARCHES_PATH = process.env.SAVED_SEARCHES_PATH ?? join(__dirname, "../public/saved-searches.json");
 const CRAWLER_ACTIVE_LOCK_PATH = process.env.CRAWLER_ACTIVE_LOCK_PATH ?? join(STATE_DIR, "crawler-active.lock");
 const CRAWLER_ACTIVE_LOCK_STALE_MS = parseInt(process.env.CRAWLER_ACTIVE_LOCK_STALE_MS ?? "7200000", 10);
+const CRAWLER_PROGRESS_PATH = process.env.CRAWLER_PROGRESS_PATH ?? join(STATE_DIR, "crawler-progress.json");
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL?.trim() ?? "";
 const SCORE_NOTIFY_MIN_SCORE = parseFloat(process.env.SCORE_NOTIFY_MIN_SCORE ?? "4");
 const LOGO_CACHE_MAX = 2000;
@@ -998,6 +999,46 @@ app.get("/api/stats", (_req, res) => {
     res.json({ total, byProvider, lastCrawl: lastSeen });
   } catch (err) {
     console.error("/api/stats error:", err);
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+function nextScheduledRun(): Date {
+  // Schedule: 0 8,10,12,14,16,18,20 * * * (local time)
+  const hours = [8, 10, 12, 14, 16, 18, 20];
+  const now = new Date();
+  const todaySlots = hours.map(h => {
+    const d = new Date(now);
+    d.setHours(h, 0, 0, 0);
+    return d;
+  });
+  const next = todaySlots.find(d => d > now);
+  if (next) return next;
+  // Roll to tomorrow's first slot
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(hours[0]!, 0, 0, 0);
+  return tomorrow;
+}
+
+app.get("/api/crawl-status", async (_req, res) => {
+  try {
+    const active = await isCrawlerActive();
+    if (!active) {
+      const { n: total_jobs } = db.prepare("SELECT COUNT(*) as n FROM catalog_jobs").get() as { n: number };
+      res.json({ active: false, next_run: nextScheduledRun().toISOString(), total_jobs });
+      return;
+    }
+    let progress: Record<string, unknown> | null = null;
+    try {
+      const raw = await readFile(CRAWLER_PROGRESS_PATH, "utf8");
+      progress = JSON.parse(raw.trim()) as Record<string, unknown>;
+    } catch {
+      // progress file not yet written or unreadable — still report active
+    }
+    res.json({ active: true, progress });
+  } catch (err) {
+    console.error("/api/crawl-status error:", err);
     res.status(500).json({ error: String(err) });
   }
 });

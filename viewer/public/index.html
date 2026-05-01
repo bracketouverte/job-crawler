@@ -25,10 +25,19 @@
   <section class="filters-panel">
     <div class="filters-top">
       <div class="filters-heading">
-        <h2>Refine the job stream</h2>
+        <div class="filters-heading-row">
+          <h2>Refine the job stream</h2>
+        </div>
         <div class="result-count" id="result-count"></div>
       </div>
       <div class="filters-stats" id="stats"></div>
+      <div class="crawl-indicator" id="crawl-indicator" aria-label="Crawl status">
+        <div class="crawl-bar-wrap">
+          <div class="crawl-bar-fill" id="crawl-bar-fill"></div>
+        </div>
+        <span class="crawl-bar-pct" id="crawl-bar-pct"></span>
+        <div class="crawl-popover" id="crawl-popover"></div>
+      </div>
     </div>
     <div class="filters-grid">
       <div class="filter-group">

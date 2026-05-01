@@ -6,7 +6,7 @@
     "location": "remote",
     "company": "",
     "sources": [],
-    "days": "1"
+    "days": "3"
   },
   {
     "id": "pm-soflo",
@@ -15,7 +15,7 @@
     "location": "remote",
     "company": "",
     "sources": [],
-    "days": "1"
+    "days": "3"
   },
   {
     "id": "saved-ai-product",
@@ -24,6 +24,6 @@
     "location": "remote",
     "company": "",
     "sources": [],
-    "days": "1"
+    "days": "3"
   }
 ]
