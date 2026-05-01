@@ -515,6 +515,9 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
   const jobUrl = String(row.job_url ?? row.url ?? "");
   const thumbnailUrl = companyLogoUrl(company);
   const companyUrl = companyWebsite(company);
+  const roleSummary = (analysis as { role_summary?: Record<string, unknown> } | null)?.role_summary ?? {};
+  const tldr   = roleSummary.tldr   ? String(roleSummary.tldr)   : null;
+  const domain = roleSummary.domain ? String(roleSummary.domain) : null;
   const embed = {
     title,
     url: jobUrl || undefined,
@@ -526,7 +529,9 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
       { name: "Location", value: normalizeLabel(row.location as string | null | undefined) || "n/a", inline: true },
       { name: "Mode", value: jobMode(row.location as string | null | undefined, row.employment_type as string | null | undefined), inline: true },
       { name: "Compensation", value: jobCompensation(row.compensation as string | null | undefined), inline: true },
+      ...(domain ? [{ name: "Domain", value: domain, inline: true }] : []),
       { name: "Decision", value: decisionEmoji(score), inline: false },
+      ...(tldr ? [{ name: "Role", value: tldr, inline: false }] : []),
     ],
     ...(companyUrl ? { footer: { text: companyUrl } } : {}),
   };
