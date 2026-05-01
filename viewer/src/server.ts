@@ -368,17 +368,13 @@ function sanitizeJob(row: JobRow): JobRow {
 
 function hasFullAnalysis(cached: CachedJobAnalysis | undefined): boolean {
   if (!cached) return false;
-  const ensemblePipelines = ["ensemble", "claude-ensemble", "codex-ensemble"];
-  return ensemblePipelines.some(p => cached.pipelines?.[p] != null);
+  return cached.pipelines?.["claude-ensemble"] != null;
 }
 
 function bestAnalysis(cached: CachedJobAnalysis | undefined): unknown {
   if (!cached) return null;
-  // prefer ensemble-type pipelines, then whatever is newest
-  const ensemblePipelines = ["ensemble", "claude-ensemble", "codex-ensemble"];
-  for (const p of ensemblePipelines) {
-    if (cached.pipelines?.[p]) return cached.pipelines[p].analysis;
-  }
+  if (cached.pipelines?.["claude-ensemble"]) return cached.pipelines["claude-ensemble"].analysis;
+  if (cached.pipelines?.["claude"]) return cached.pipelines["claude"].analysis;
   // fallback: latest by analyzed_at
   const entries = Object.values(cached.pipelines ?? {});
   if (entries.length === 0) return cached.analysis ?? null;
@@ -846,19 +842,11 @@ async function executeMatchRun(runId: string, jobs: JobRow[], mode?: string): Pr
     const preparedManifest = await writeBatchInput(runId, jobs, runningManifest);
     await writeManifest(preparedManifest);
 
-    const isEnsemble = mode === "ensemble" || mode === "claude-ensemble" || mode === "codex-ensemble";
-    const isCodex = mode === "codex" || mode === "codex-ensemble";
+    const isEnsemble = mode === "claude-ensemble";
     const script = isEnsemble
-      ? join(MATCHER_DIR, isCodex ? "ensemble_runner_codex.py" : "ensemble_runner.py")
-      : join(MATCHER_DIR, isCodex ? "job_fit_analyzer_codex.py" : "job_fit_analyzer.py");
-
-    // Pipeline tag controls what's written to analysis.pipeline in output.
-    // claude / claude-ensemble = structured pre-extraction (this branch).
-    // codex / codex-ensemble   = Codex's parallel implementation.
-    // maverick / ensemble      = original single-pass pipeline.
-    const pipelineTag = (mode === "claude" || mode === "claude-ensemble" || mode === "codex" || mode === "codex-ensemble")
-      ? mode
-      : isEnsemble ? "ensemble" : "maverick";
+      ? join(MATCHER_DIR, "ensemble_runner.py")
+      : join(MATCHER_DIR, "job_fit_analyzer.py");
+    const pipelineTag = isEnsemble ? "claude-ensemble" : "claude";
 
     await runCommand(
       PYTHON_BIN,
@@ -1331,7 +1319,7 @@ async function runSavedSearchAnalyzerOnce(): Promise<void> {
       job: manifest.jobs[0]!,
       startedAt: manifest.created_at,
     };
-    await executeMatchRun(runId, [next.job], "ensemble");
+    await executeMatchRun(runId, [next.job], "claude-ensemble");
   } catch (error) {
     console.error("saved-search analyzer error:", error);
   } finally {

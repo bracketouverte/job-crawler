@@ -177,12 +177,8 @@
   /* ── Footer HTML ─────────────────────────────────────────────── */
   // Pipeline metadata: color, label, CSS class, spark color class
   const PIPELINES = {
-    'maverick':        { color: '#2563eb', label: 'Quick',         btnClass: 'btn-analyze--quick',      spark: 'btn-spark--blue',   dur: '~20s',  swatchClass: 'menu-swatch--maverick' },
-    'ensemble':        { color: '#7c3aed', label: 'Full',          btnClass: 'btn-analyze--full',       spark: 'btn-spark--purple', dur: '~2min', swatchClass: 'menu-swatch--ensemble' },
-    'claude':          { color: '#0d9488', label: 'Claude Quick',  btnClass: 'btn-analyze--claude',     spark: 'btn-spark--teal',   dur: '~25s',  swatchClass: 'menu-swatch--claude' },
-    'claude-ensemble': { color: '#4338ca', label: 'Claude Full',   btnClass: 'btn-analyze--claude-ens', spark: 'btn-spark--indigo', dur: '~2min', swatchClass: 'menu-swatch--claude-ens' },
-    'codex':           { color: '#b45309', label: 'Codex Quick',   btnClass: 'btn-analyze--codex',      spark: 'btn-spark--amber',  dur: '~25s',  swatchClass: 'menu-swatch--codex' },
-    'codex-ensemble':  { color: '#7f1d1d', label: 'Codex Full',    btnClass: 'btn-analyze--codex-ens',  spark: 'btn-spark--red',    dur: '~2min', swatchClass: 'menu-swatch--codex-ens' },
+    'claude':          { color: '#0d9488', label: 'Quick',  btnClass: 'btn-analyze--claude',     spark: 'btn-spark--teal',   dur: '~25s',  swatchClass: 'menu-swatch--claude' },
+    'claude-ensemble': { color: '#4338ca', label: 'Full',   btnClass: 'btn-analyze--claude-ens', spark: 'btn-spark--indigo', dur: '~2min', swatchClass: 'menu-swatch--claude-ens' },
   };
 
   function pipelineChipsHtml(job) {
@@ -201,36 +197,18 @@
   function footerHtml(job) {
     const btn = (mode, jsClass) => {
       const p = PIPELINES[mode];
-      const label = `${p.label} analyze`;
       return `
       <div class="btn-analyze-wrap">
         <button class="btn btn-analyze ${p.btnClass} ${jsClass}" title="${p.label} analysis · ${p.dur}">
-          <span class="btn-spark ${p.spark}">✦</span> ${esc(label)}
+          <span class="btn-spark ${p.spark}">✦</span> ${esc(p.label)} analyze
         </button>
       </div>`;
     };
 
     return `
       ${pipelineChipsHtml(job)}
-      ${btn('maverick', 'js-analyze-quick')}
-      ${btn('ensemble', 'js-analyze-full')}
-      ${btn('claude',   'js-analyze-claude')}
+      ${btn('claude',          'js-analyze-claude')}
       ${btn('claude-ensemble', 'js-analyze-claude-ens')}
-      ${btn('codex',          'js-analyze-codex')}
-      ${btn('codex-ensemble', 'js-analyze-codex-ens')}
-      <button class="btn btn-ghost js-run-multi-toggle" title="Run multiple pipelines at once">▾ Multi-run</button>
-      <div class="multi-run-panel" style="display:none;">
-        <div class="multi-run-checks">
-          ${Object.entries(PIPELINES).map(([mode, p]) => `
-            <label class="multi-run-check" style="--chip-color:${p.color};">
-              <input type="checkbox" class="js-multi-check" data-mode="${esc(mode)}">
-              <span class="multi-run-dot" style="background:${p.color};"></span>
-              <span>${esc(p.label)}</span>
-              <span class="multi-run-dur">${esc(p.dur)}</span>
-            </label>`).join('')}
-        </div>
-        <button class="btn btn-ghost js-run-selected" disabled>Run selected</button>
-      </div>
       <button class="btn btn-ghost js-jd-data" title="Extracted JD data">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> JD data
       </button>
@@ -239,43 +217,10 @@
 
   function bindFooterEvents(footer, job) {
     footer.querySelectorAll('.js-open-panel-pipeline').forEach(el => {
-      el.addEventListener('click', () => {
-        const tag = el.dataset.pipeline;
-        openPanel(job, tag);
-      });
+      el.addEventListener('click', () => openPanel(job, el.dataset.pipeline));
     });
-    footer.querySelector('.js-analyze-quick')?.addEventListener('click',      () => analyzeJob(job, null, 'maverick'));
-    footer.querySelector('.js-analyze-full')?.addEventListener('click',       () => analyzeJob(job, null, 'ensemble'));
     footer.querySelector('.js-analyze-claude')?.addEventListener('click',     () => analyzeJob(job, null, 'claude'));
     footer.querySelector('.js-analyze-claude-ens')?.addEventListener('click', () => analyzeJob(job, null, 'claude-ensemble'));
-    footer.querySelector('.js-analyze-codex')?.addEventListener('click',      () => analyzeJob(job, null, 'codex'));
-    footer.querySelector('.js-analyze-codex-ens')?.addEventListener('click',  () => analyzeJob(job, null, 'codex-ensemble'));
-
-    // Multi-run toggle
-    const multiToggle = footer.querySelector('.js-run-multi-toggle');
-    const multiPanel  = footer.querySelector('.multi-run-panel');
-    const runSelected = footer.querySelector('.js-run-selected');
-    if (multiToggle && multiPanel) {
-      multiToggle.addEventListener('click', () => {
-        const open = multiPanel.style.display !== 'none';
-        multiPanel.style.display = open ? 'none' : 'flex';
-        multiToggle.classList.toggle('active', !open);
-      });
-      multiPanel.querySelectorAll('.js-multi-check').forEach(cb => {
-        cb.addEventListener('change', () => {
-          const anyChecked = [...multiPanel.querySelectorAll('.js-multi-check')].some(c => c.checked);
-          runSelected.disabled = !anyChecked;
-        });
-      });
-      runSelected.addEventListener('click', () => {
-        const modes = [...multiPanel.querySelectorAll('.js-multi-check:checked')].map(c => c.dataset.mode);
-        if (!modes.length) return;
-        multiPanel.style.display = 'none';
-        multiToggle.classList.remove('active');
-        for (const mode of modes) analyzeJob(job, null, mode);
-      });
-    }
-
     footer.querySelector('.js-jd-data')?.addEventListener('click',            () => openJdModal(job));
     footer.querySelector('.js-hide')?.addEventListener('click',               () => hideJob(jobKey(job), job));
   }
@@ -537,15 +482,7 @@
     const tier  = scoreTier(score);
     const tierLabel = tier === 'high' ? 'Strong fit' : tier === 'mid' ? 'Partial fit' : 'Weak fit';
     const pct   = Math.round((score / 5) * 100);
-    const pipeline = tag || analysis.pipeline || 'maverick';
-    const pipelineBadgeLabels = {
-      maverick: 'Preview · Maverick',
-      ensemble: 'Ensemble pipeline',
-      claude: 'Claude Quick',
-      'claude-ensemble': 'Claude Full',
-      codex: 'Codex Quick',
-      'codex-ensemble': 'Codex Full',
-    };
+    const pipeline = tag || analysis.pipeline || 'claude';
 
     const strengths = Array.isArray(analysis.requirement_match)
       ? analysis.requirement_match.slice(0, 4).map(m => `${m.requirement || '—'}: ${m.profile_evidence || '—'}`)
@@ -575,7 +512,7 @@
       </section>
       <div class="panel-actions">
         <div class="panel-rerun-wrap">
-          <button class="btn btn-ghost" id="panel-reanalyze" data-mode="${esc(pipeline)}">Re-run · ${esc(pipelineBadgeLabels[pipeline] || pipeline)}</button>
+          <button class="btn btn-ghost" id="panel-reanalyze" data-mode="${esc(pipeline)}">Re-run · ${esc(PIPELINES[pipeline]?.label || pipeline)}</button>
           <button class="panel-rerun-caret" id="panel-rerun-caret" title="Choose pipeline">▾</button>
           <div class="panel-rerun-menu" id="panel-rerun-menu">
             ${Object.entries(PIPELINES).map(([m, p]) => `
@@ -702,16 +639,12 @@
 
   /* ── Analyze ─────────────────────────────────────────────────── */
   const MODE_BTN_CLASS = {
-    'maverick':        'js-analyze-quick',
-    'ensemble':        'js-analyze-full',
     'claude':          'js-analyze-claude',
     'claude-ensemble': 'js-analyze-claude-ens',
-    'codex':           'js-analyze-codex',
-    'codex-ensemble':  'js-analyze-codex-ens',
   };
 
   // activeAnalysisJobs is keyed by `jobKey|mode` to support concurrent pipelines per job
-  function activeJobRunKey(job, mode) { return `${jobKey(job)}|${mode ?? 'maverick'}`; }
+  function activeJobRunKey(job, mode) { return `${jobKey(job)}|${mode ?? 'claude'}`; }
   function jobHasActiveRuns(job) {
     const prefix = jobKey(job) + '|';
     for (const k of activeAnalysisJobs.keys()) { if (k.startsWith(prefix)) return true; }
@@ -719,7 +652,7 @@
   }
 
   function setMainBtnSpinner(job, label, mode, source = 'manual') {
-    activeAnalysisJobs.set(activeJobRunKey(job, mode), { label, mode: mode ?? 'maverick', source });
+    activeAnalysisJobs.set(activeJobRunKey(job, mode), { label, mode: mode ?? 'claude', source });
     const card = document.querySelector(`.job-card[data-key="${CSS.escape(jobKey(job))}"]`);
     if (!card) return;
     card.querySelectorAll('.btn-analyze').forEach(b => { b.disabled = true; });
@@ -760,11 +693,10 @@
   }
 
   function modeLabel(mode) {
-    const labels = { maverick: 'Preview · Maverick', ensemble: 'Ensemble pipeline', claude: 'Claude Quick', 'claude-ensemble': 'Claude Full', codex: 'Codex Quick', 'codex-ensemble': 'Codex Full' };
-    return labels[mode] || mode;
+    return PIPELINES[mode]?.label || mode;
   }
   function modeDuration(mode) {
-    return (mode === 'ensemble' || mode === 'claude-ensemble' || mode === 'codex-ensemble') ? '~2 min' : '~25 sec';
+    return PIPELINES[mode]?.dur || '~25 sec';
   }
 
   function renderAutoAnalyzerToast(status) {
@@ -828,7 +760,7 @@
     if (currentKey) {
       autoAnalyzerLastJobKey = currentKey;
       const job = allJobs.find(j => jobKey(j) === currentKey);
-      if (job) setMainBtnSpinner(job, 'Analyzing…', 'ensemble', 'auto');
+      if (job) setMainBtnSpinner(job, 'Analyzing…', 'claude-ensemble', 'auto');
     } else if (autoAnalyzerLastJobKey) {
       const state = activeAnalysisJobs.get(autoAnalyzerLastJobKey);
       if (state?.source === 'auto') {
@@ -853,7 +785,7 @@
   }
 
   async function analyzeJob(job, _triggerEl, mode) {
-    const spinnerLabel = mode === 'ensemble' ? 'Analyzing pipeline…' : 'Analyzing…';
+    const spinnerLabel = mode === 'claude-ensemble' ? 'Analyzing pipeline…' : 'Analyzing…';
     setMainBtnSpinner(job, spinnerLabel, mode);
     const comp = companyName(job);
     const notifId = pushNotif(
