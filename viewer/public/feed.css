@@ -1087,36 +1087,6 @@ body {
 .jd-loading { text-align: center; color: var(--muted); padding: 2rem 0; font-size: 13px; }
 .jd-error { color: var(--danger); font-size: 13px; }
 
-/* ── Pipeline chips (card footer) ───────────────────────────── */
-.pipeline-chips-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 8px;
-  grid-column: 1 / -1;
-  width: 100%;
-}
-.pipeline-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  cursor: pointer;
-  border: 1px solid;
-  white-space: nowrap;
-  background: transparent;
-  transition: opacity 0.15s;
-}
-.pipeline-chip:hover { opacity: 0.8; }
-.pipeline-chip-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
 
 /* ── Multi-run panel ─────────────────────────────────────────── */
 .multi-run-panel {

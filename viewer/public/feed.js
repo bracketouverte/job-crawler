@@ -181,32 +181,25 @@
     'claude-ensemble': { color: '#4338ca', label: 'Full',   btnClass: 'btn-analyze--claude-ens', spark: 'btn-spark--indigo', dur: '~2min', swatchClass: 'menu-swatch--claude-ens' },
   };
 
-  function pipelineChipsHtml(job) {
-    const pipelines = job.pipelines || {};
-    const entries = Object.entries(pipelines);
-    if (entries.length === 0) return '';
-    const chips = entries.map(([tag, result]) => {
-      const p = PIPELINES[tag] || { color: '#6b7280', label: tag };
-      const score = Number(result.analysis?.score_5 || 0);
-      const scoreStr = score > 0 ? score.toFixed(1) : '—';
-      return `<button class="pipeline-chip js-open-panel-pipeline" data-pipeline="${esc(tag)}" title="${esc(p.label || tag)} · Score ${scoreStr}/5" style="color:${p.color};border-color:${p.color}44;background:${p.color}11;"><span class="pipeline-chip-dot" style="background:${p.color};"></span>${esc(p.label || tag)} ${esc(scoreStr)}</button>`;
-    });
-    return `<div class="pipeline-chips-row">${chips.join('')}</div>`;
-  }
-
   function footerHtml(job) {
+    const pipelines = job.pipelines || {};
     const btn = (mode, jsClass) => {
       const p = PIPELINES[mode];
+      const result = pipelines[mode];
+      const score = Number(result?.analysis?.score_5 || 0);
+      const scoreBadge = score > 0
+        ? `<button class="btn-score-badge js-open-panel-pipeline" data-pipeline="${esc(mode)}" style="background:${p.color}" title="Open analysis">${score.toFixed(1)}<span class="btn-score-badge-max">/5</span></button>`
+        : '';
       return `
       <div class="btn-analyze-wrap">
-        <button class="btn btn-analyze ${p.btnClass} ${jsClass}" title="${p.label} analysis · ${p.dur}">
+        <button class="btn btn-analyze ${p.btnClass} ${jsClass}${score > 0 ? ' ran' : ''}" title="${p.label} analysis · ${p.dur}">
           <span class="btn-spark ${p.spark}">✦</span> ${esc(p.label)} analyze
         </button>
+        ${scoreBadge}
       </div>`;
     };
 
     return `
-      ${pipelineChipsHtml(job)}
       ${btn('claude',          'js-analyze-claude')}
       ${btn('claude-ensemble', 'js-analyze-claude-ens')}
       <button class="btn btn-ghost js-jd-data" title="Extracted JD data">
