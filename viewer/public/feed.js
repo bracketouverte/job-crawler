@@ -985,6 +985,37 @@
   let savedSearches = [];
   const activeSearchIds = new Set();
 
+  /* ── URL state persistence ───────────────────────────────────── */
+  function pushUrlState(page) {
+    const p = new URLSearchParams();
+    const title   = document.getElementById('filter-title').value.trim();
+    const loc     = document.getElementById('filter-location').value.trim();
+    const company = document.getElementById('filter-company').value.trim();
+    const days    = document.getElementById('filter-days').value.trim();
+    const sources = getSelectedProviders();
+    if (title)                    p.set('title', title);
+    if (loc)                      p.set('loc', loc);
+    if (company)                  p.set('company', company);
+    if (days)                     p.set('days', days);
+    if (sources.length)           p.set('sources', sources.join(','));
+    if (activeSearchIds.size > 0) p.set('searches', [...activeSearchIds].join(','));
+    if (page && page > 1)         p.set('page', String(page));
+    const qs = p.toString();
+    history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
+  }
+
+  function restoreFromUrl() {
+    const p = new URLSearchParams(location.search);
+    if (p.has('title'))    document.getElementById('filter-title').value    = p.get('title');
+    if (p.has('loc'))      document.getElementById('filter-location').value = p.get('loc');
+    if (p.has('company'))  document.getElementById('filter-company').value  = p.get('company');
+    if (p.has('days'))     document.getElementById('filter-days').value     = p.get('days');
+    // sources: deferred to loadSources() since checkboxes don't exist yet at boot
+    activeSearchIds.clear();
+    if (p.has('searches')) p.get('searches').split(',').filter(Boolean).forEach(id => activeSearchIds.add(Number(id)));
+    return p.has('page') ? parseInt(p.get('page'), 10) || 1 : 1;
+  }
+
   function applySearchLock(locked) {
     ['filter-title','filter-location','filter-company','filter-days'].forEach(id => {
       document.getElementById(id).disabled = locked;
@@ -1031,8 +1062,12 @@
         }
         fetchJobs(1);
       });
+      if (activeSearchIds.has(s.id)) btn.classList.add('active');
       strip.appendChild(btn);
     }
+    // Apply lock state from restored URL
+    const multi = activeSearchIds.size > 1;
+    applySearchLock(multi);
   }
   loadSavedSearches();
 
@@ -1162,6 +1197,7 @@
         }
       }
       document.getElementById('loading-state').style.display = 'none';
+      pushUrlState(currentPage);
       renderCurrentView();
     } catch {
       document.getElementById('loading-state').innerHTML = '<div style="color:var(--danger)">Error loading jobs.</div>';
@@ -1208,6 +1244,9 @@
         label.innerHTML = `<input type="checkbox" value="${esc(src)}" /><span>${esc(src)}</span>`;
         providerMenu.appendChild(label);
       }
+      // Re-apply sources that were restored from URL (checkboxes didn't exist yet)
+      const urlSources = new URLSearchParams(location.search).get('sources');
+      if (urlSources) setSelectedProviders(urlSources.split(',').filter(Boolean));
       syncProviderLabel();
     } catch {}
   }
@@ -1328,11 +1367,24 @@
   }
 
   /* ── Boot ────────────────────────────────────────────────────── */
+  const bootPage = restoreFromUrl();
   loadSources();
   renderFavChips();
   syncHiddenJobs();
   fetchConfig();
   fetchStats();
-  fetchJobs(1);
+  fetchJobs(bootPage);
   pollAutoAnalyzer();
+
+  window.addEventListener('popstate', () => {
+    const page = restoreFromUrl();
+    const urlSources = new URLSearchParams(location.search).get('sources');
+    setSelectedProviders(urlSources ? urlSources.split(',').filter(Boolean) : []);
+    document.querySelectorAll('.saved-btn').forEach(btn => {
+      const id = Number(btn.dataset.searchId);
+      btn.classList.toggle('active', activeSearchIds.has(id));
+    });
+    applySearchLock(activeSearchIds.size > 1);
+    fetchJobs(page);
+  });
 })();
