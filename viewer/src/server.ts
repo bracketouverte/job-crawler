@@ -909,10 +909,10 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(join(__dirname, "../public")));
 
 app.get("/api/jobs", async (req, res) => {
-  const { title, location, days, company, sources, page } = req.query as Record<string, string>;
+  const { title, location, days, company, sources, page, limit } = req.query as Record<string, string>;
 
   const pageNum = Math.max(1, parseInt(page ?? "1", 10));
-  const pageSize = 50;
+  const pageSize = Math.min(500, Math.max(1, parseInt(limit ?? "50", 10)));
   const offset = (pageNum - 1) * pageSize;
 
   const { conditions, params } = addJobFilterConditions({ title, location, company, sources, days });

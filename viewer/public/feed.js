@@ -978,27 +978,45 @@
   });
 
   /* ── Saved searches ──────────────────────────────────────────── */
+  let savedSearches = [];
+  const activeSearchIds = new Set();
+
+  function applySearchLock(locked) {
+    ['filter-title','filter-location','filter-company','filter-days'].forEach(id => {
+      document.getElementById(id).disabled = locked;
+    });
+    document.querySelector('.provider-btn')?.toggleAttribute('disabled', locked);
+  }
+
   async function loadSavedSearches() {
     const strip = document.getElementById('saved-searches-strip');
-    let searches = [];
     try {
       const res = await fetch('/saved-searches.json');
-      if (res.ok) searches = await res.json();
+      if (res.ok) savedSearches = await res.json();
     } catch {}
-    for (const s of searches) {
+    for (const s of savedSearches) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'saved-btn';
-      btn.id = s.id;
+      btn.dataset.searchId = s.id;
       btn.textContent = s.label;
       btn.addEventListener('click', () => {
-        document.getElementById('filter-title').value    = s.title    ?? '';
-        document.getElementById('filter-location').value = s.location ?? '';
-        document.getElementById('filter-company').value  = s.company  ?? '';
-        document.getElementById('filter-days').value     = s.days     ?? '';
-        setSelectedProviders(s.sources || []);
-        document.querySelectorAll('.saved-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+        if (activeSearchIds.has(s.id)) {
+          activeSearchIds.delete(s.id);
+          btn.classList.remove('active');
+        } else {
+          activeSearchIds.add(s.id);
+          btn.classList.add('active');
+        }
+        const multi = activeSearchIds.size > 1;
+        const any   = activeSearchIds.size > 0;
+        applySearchLock(any);
+        if (!any) {
+          // All deselected — restore inputs to last manual state and refetch
+          applySearchLock(false);
+          fetchJobs(1);
+          return;
+        }
         fetchJobs(1);
       });
       strip.appendChild(btn);
@@ -1061,43 +1079,78 @@
   }
 
   /* ── Fetch jobs ──────────────────────────────────────────────── */
+  function buildSearchParams(overrides = {}) {
+    const p = new URLSearchParams();
+    const title   = overrides.title   ?? document.getElementById('filter-title').value.trim();
+    const loc     = overrides.loc     ?? document.getElementById('filter-location').value.trim();
+    const company = overrides.company ?? document.getElementById('filter-company').value.trim();
+    const days    = overrides.days    ?? document.getElementById('filter-days').value.trim();
+    const sources = overrides.sources ?? getSelectedProviders();
+    if (title)          p.set('title', title);
+    if (loc)            p.set('location', loc);
+    if (company)        p.set('company', company);
+    if (days)           p.set('days', days);
+    if (sources.length) p.set('sources', sources.join(','));
+    return p;
+  }
+
   async function fetchJobs(page = 1) {
-    const params  = new URLSearchParams();
-    const title   = document.getElementById('filter-title').value.trim();
-    const loc     = document.getElementById('filter-location').value.trim();
-    const company = document.getElementById('filter-company').value.trim();
-    const days    = document.getElementById('filter-days').value.trim();
-    const sources = getSelectedProviders();
-
-    if (title)          params.set('title', title);
-    if (loc)            params.set('location', loc);
-    if (company)        params.set('company', company);
-    if (days)           params.set('days', days);
-    if (sources.length) params.set('sources', sources.join(','));
-    params.set('page', String(page));
-
     document.getElementById('loading-state').style.display = 'block';
     document.getElementById('jobs-list').style.display     = 'none';
     document.getElementById('empty-state').style.display   = 'none';
     document.getElementById('pagination').style.display    = 'none';
 
     try {
-      const res  = await fetch(`/api/jobs?${params}`);
-      const data = await res.json();
-      totalJobs   = data.total;
-      pageSize    = data.pageSize;
-      currentPage = data.page;
-      allJobs     = data.jobs;
+      if (activeSearchIds.size > 0) {
+        // Multi-search: fetch each selected search in parallel, dedupe by jobKey
+        const active = savedSearches.filter(s => activeSearchIds.has(s.id));
+        const responses = await Promise.all(active.map(s => {
+          const p = buildSearchParams({
+            title: s.title ?? '', loc: s.location ?? '',
+            company: s.company ?? '', days: s.days ?? '',
+            sources: s.sources || [],
+          });
+          p.set('page', '1');
+          p.set('limit', '200');
+          return fetch(`/api/jobs?${p}`).then(r => r.json());
+        }));
+        const seen = new Set();
+        const merged = [];
+        for (const data of responses) {
+          for (const job of (data.jobs || [])) {
+            const k = jobKey(job);
+            if (!seen.has(k)) { seen.add(k); merged.push(job); }
+          }
+        }
+        // Sort merged by posted_at desc
+        merged.sort((a, b) => {
+          const da = a.posted_at || a.first_seen_at || '';
+          const db_ = b.posted_at || b.first_seen_at || '';
+          return da < db_ ? 1 : da > db_ ? -1 : 0;
+        });
+        totalJobs   = merged.length;
+        pageSize    = merged.length;
+        currentPage = 1;
+        allJobs     = merged;
+      } else {
+        const params = buildSearchParams();
+        params.set('page', String(page));
+        const res  = await fetch(`/api/jobs?${params}`);
+        const data = await res.json();
+        totalJobs   = data.total;
+        pageSize    = data.pageSize;
+        currentPage = data.page;
+        allJobs     = data.jobs;
+        const totalPages = Math.ceil(totalJobs / pageSize);
+        if (totalPages > 1) {
+          document.getElementById('page-info').textContent = `Page ${currentPage} / ${totalPages}`;
+          document.getElementById('btn-prev').disabled = currentPage <= 1;
+          document.getElementById('btn-next').disabled = currentPage >= totalPages;
+          document.getElementById('pagination').style.display = 'flex';
+        }
+      }
       document.getElementById('loading-state').style.display = 'none';
       renderCurrentView();
-
-      const totalPages = Math.ceil(totalJobs / pageSize);
-      if (totalPages > 1) {
-        document.getElementById('page-info').textContent = `Page ${currentPage} / ${totalPages}`;
-        document.getElementById('btn-prev').disabled = currentPage <= 1;
-        document.getElementById('btn-next').disabled = currentPage >= totalPages;
-        document.getElementById('pagination').style.display = 'flex';
-      }
     } catch {
       document.getElementById('loading-state').innerHTML = '<div style="color:var(--danger)">Error loading jobs.</div>';
     }
