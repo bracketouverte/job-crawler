@@ -755,9 +755,10 @@
       const job = allJobs.find(j => jobKey(j) === currentKey);
       if (job) setMainBtnSpinner(job, 'Analyzing…', 'claude-ensemble', 'auto');
     } else if (autoAnalyzerLastJobKey) {
-      const state = activeAnalysisJobs.get(autoAnalyzerLastJobKey);
+      const runKey = autoAnalyzerLastJobKey + '|claude-ensemble';
+      const state = activeAnalysisJobs.get(runKey);
       if (state?.source === 'auto') {
-        activeAnalysisJobs.delete(autoAnalyzerLastJobKey);
+        activeAnalysisJobs.delete(runKey);
         if (autoAnalyzerLastActive) fetchJobs(currentPage);
         else renderCurrentView();
       }
@@ -815,6 +816,9 @@
       const res = await fetch(`/api/match-runs/${encodeURIComponent(runId)}`);
       const run = await res.json();
       if (!res.ok) throw new Error(run.error || 'Failed');
+
+      // Orphaned run: server restarted and lost in-memory state — treat as completed
+      if (run.status === 'running' && run.is_active === false) run.status = 'completed';
 
       if (run.status === 'completed' || run.status === 'failed') {
         activeRuns.delete(runId);
@@ -907,9 +911,9 @@
       scheduleRunPoll(runId);
     } catch {
       activeRuns.delete(runId);
-      activeAnalysisJobs.delete(jobKey(job));
+      activeAnalysisJobs.delete(activeJobRunKey(job, mode));
       dismissNotif(notifId);
-      restoreMainBtn(job);
+      restoreMainBtn(job, mode);
       pushNotif('error', `Failed · ${job.title ?? 'Job'} · ${companyName(job)}`, `${modeLabel(mode)} · network error`, false, null);
     }
   }
@@ -1009,13 +1013,21 @@
           btn.classList.add('active');
         }
         const multi = activeSearchIds.size > 1;
-        const any   = activeSearchIds.size > 0;
-        applySearchLock(any);
-        if (!any) {
-          // All deselected — restore inputs to last manual state and refetch
-          applySearchLock(false);
+        applySearchLock(multi);
+        if (activeSearchIds.size === 0) {
           fetchJobs(1);
           return;
+        }
+        if (!multi) {
+          // Single search — fill inputs as before
+          const single = savedSearches.find(x => activeSearchIds.has(x.id));
+          if (single) {
+            document.getElementById('filter-title').value    = single.title    ?? '';
+            document.getElementById('filter-location').value = single.location ?? '';
+            document.getElementById('filter-company').value  = single.company  ?? '';
+            document.getElementById('filter-days').value     = single.days     ?? '';
+            setSelectedProviders(single.sources || []);
+          }
         }
         fetchJobs(1);
       });

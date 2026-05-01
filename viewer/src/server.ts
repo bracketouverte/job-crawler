@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1328,8 +1328,29 @@ async function runSavedSearchAnalyzerOnce(): Promise<void> {
   }
 }
 
+async function markOrphanedRunsFailed(): Promise<void> {
+  try {
+    const entries = await readdir(MATCH_RUNS_DIR);
+    for (const entry of entries) {
+      const manifestPath = join(MATCH_RUNS_DIR, entry, "manifest.json");
+      try {
+        const raw = await readFile(manifestPath, "utf8");
+        const manifest = JSON.parse(raw) as MatchRunManifest;
+        if (manifest.status === "running") {
+          await writeFile(
+            manifestPath,
+            `${JSON.stringify({ ...manifest, status: "failed", finished_at: new Date().toISOString(), error: "orphaned: server restarted" }, null, 2)}\n`,
+            "utf8",
+          );
+        }
+      } catch { /* skip unreadable manifests */ }
+    }
+  } catch { /* match-runs dir may not exist yet */ }
+}
+
 app.listen(PORT, async () => {
   await mkdir(MATCH_RUNS_DIR, { recursive: true });
+  await markOrphanedRunsFailed();
   console.log(`viewer listening on http://localhost:${PORT}`);
   if (SAVED_SEARCH_ANALYZER_ENABLED) {
     setTimeout(() => void runSavedSearchAnalyzerOnce(), 5000);
