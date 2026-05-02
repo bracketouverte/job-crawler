@@ -15,7 +15,7 @@ crawler/output/*
 
 # Local crawler state artifacts (never commit)
 crawler/state/*
-!crawler/state/.gitkeep
+!crawler/state/README.md
 
 # Local source datasets (never commit)
 sources/*.json
