@@ -480,8 +480,31 @@
     const strengths = Array.isArray(analysis.requirement_match)
       ? analysis.requirement_match.slice(0, 4).map(m => `${m.requirement || '—'}: ${m.profile_evidence || '—'}`)
       : [];
-    const gaps = Array.isArray(analysis.gaps) ? analysis.gaps.slice(0, 4).map(g => g.gap || g) : [];
+    const rawGaps = Array.isArray(analysis.gaps) ? analysis.gaps.slice(0, 4) : [];
+    const gaps = rawGaps.map(g => (typeof g === 'string' ? { gap: g, severity: null, mitigation: '' } : g));
     const blockers = Array.isArray(analysis.blockers) ? analysis.blockers : [];
+
+    const SCORECARD_LABELS = {
+      core_skills:           'Core skills',
+      relevant_experience:   'Relevant exp.',
+      target_alignment:      'Target align.',
+      seniority_fit:         'Seniority fit',
+      workplace_fit:         'Workplace fit',
+      requirements_coverage: 'Req. coverage',
+    };
+    const scorecard = analysis.scorecard || null;
+
+    const REC_TIER = {
+      apply_now:        'high',
+      worth_applying:   'mid',
+      only_if_strategic:'low',
+      do_not_apply:     'low',
+    };
+    const rec    = analysis.application_recommendation || null;
+    const recTier = REC_TIER[rec] || 'mid';
+
+    const toolMatch = Array.isArray(analysis.tool_match) ? analysis.tool_match : [];
+    const standout  = analysis.standout_differentiator || analysis.remarques || null;
 
     // Pipeline tabs (only if multiple pipelines)
     const tabsHtml = pipelineTags.length > 1 ? `
@@ -493,6 +516,63 @@
         }).join('')}
       </div>` : '';
 
+    const toolMatchHtml = toolMatch.length ? `
+      <section class="panel-section">
+        <div class="panel-section-label">Tool match</div>
+        <div class="tool-chips">
+          ${toolMatch.map(t => {
+            const str = t.strength || 'partial';
+            const imp = t.importance || '';
+            const title = [t.profile_evidence, imp ? `importance: ${imp}` : ''].filter(Boolean).join(' · ');
+            return `<span class="tool-chip" data-strength="${esc(str)}" title="${esc(title)}">${esc(t.tool || '?')}</span>`;
+          }).join('')}
+        </div>
+      </section>` : '';
+
+    const standoutHtml = standout ? `
+      <section class="panel-section">
+        <div class="panel-section-label">Standout</div>
+        <blockquote class="standout-callout">${esc(standout)}</blockquote>
+      </section>` : '';
+
+    const scorecardHtml = scorecard ? `
+      <section class="panel-section">
+        <div class="panel-section-label">Scorecard</div>
+        <div class="scorecard-rows">
+          ${Object.entries(SCORECARD_LABELS).map(([key, label]) => {
+            const dim = scorecard[key];
+            if (!dim) return '';
+            const s = Number(dim.score || 0);
+            const pctDim = Math.round((s / 5) * 100);
+            const dimTier = s >= 4 ? 'high' : s >= 3 ? 'mid' : 'low';
+            const reason = dim.reason ? esc(dim.reason) : '';
+            return `<div class="sc-row" ${reason ? `title="${reason}"` : ''}>
+              <span class="sc-label">${esc(label)}</span>
+              <div class="sc-bar-wrap">
+                <div class="sc-bar-fill" data-tier="${dimTier}" style="width:${pctDim}%"></div>
+              </div>
+              <span class="sc-score mono" data-tier="${dimTier}">${s.toFixed(1)}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </section>` : '';
+
+    const allGapsEnhanced = [
+      ...gaps.map(g => ({ text: g.gap, severity: g.severity || null, mitigation: g.mitigation || '', blocker: false })),
+      ...blockers.map(b => ({ text: typeof b === 'string' ? b : (b.gap || String(b)), severity: 'blocker', mitigation: '', blocker: true })),
+    ];
+    const gapsEnhancedHtml = allGapsEnhanced.length ? `
+      <section class="panel-section">
+        <div class="panel-section-label">Gaps &amp; Blockers <span class="section-info" title="Dash color: red = blocker (hard stop), orange = medium gap, grey = minor gap. Italic text = suggested mitigation.">ⓘ</span></div>
+        <ul class="bullet-list gap-list">
+          ${allGapsEnhanced.map(g => {
+            const sevAttr = g.severity ? ` data-severity="${esc(g.severity)}"` : '';
+            const mit = g.mitigation ? `<span class="gap-mitigation">${esc(g.mitigation)}</span>` : '';
+            return `<li${sevAttr}><span class="gap-content">${esc(g.text)}${mit}</span></li>`;
+          }).join('')}
+        </ul>
+      </section>` : '';
+
     document.getElementById('panel-body').innerHTML = `
       ${tabsHtml}
       <section class="score-block">
@@ -500,6 +580,7 @@
           <span class="score-num mono">${score.toFixed(1)}</span>
           <span class="score-max mono">/ 5.0</span>
           <span class="score-tag" data-tier="${esc(tier)}">${esc(tierLabel)}</span>
+          ${rec ? `<span class="verdict-badge" data-tier="${esc(recTier)}">${esc(recLabel(rec))}</span>` : ''}
         </div>
         <div class="score-bar"><div class="score-bar-fill" data-tier="${esc(tier)}" style="width:${pct}%"></div></div>
       </section>
@@ -518,36 +599,17 @@
         </div>
         ${job.job_url ? `<a href="${esc(job.job_url)}" target="_blank" rel="noopener" class="btn btn-primary">Apply ↗</a>` : ''}
       </div>
-      ${analysis.role_summary?.tldr ? `
-      <section class="panel-section">
-        <div class="panel-section-label">Role TL;DR</div>
-        <p style="font-size:13px;line-height:1.55;color:var(--ink-2);margin:0;">${esc(analysis.role_summary.tldr)}</p>
-      </section>` : ''}
-      ${strengths.length ? `
-      <section class="panel-section">
-        <div class="panel-section-label">Requirement match</div>
-        <ul class="bullet-list" data-kind="strengths">
-          ${strengths.map(s => `<li>${esc(s)}</li>`).join('')}
-        </ul>
-      </section>` : ''}
-      ${gaps.length ? `
-      <section class="panel-section">
-        <div class="panel-section-label">Gaps</div>
-        <ul class="bullet-list" data-kind="gaps">
-          ${gaps.map(g => `<li>${esc(g)}</li>`).join('')}
-        </ul>
-      </section>` : ''}
-      ${blockers.length ? `
-      <section class="panel-section">
-        <div class="panel-section-label">Blockers</div>
-        <ul class="bullet-list" data-kind="blockers">
-          ${blockers.map(b => `<li>${esc(b)}</li>`).join('')}
-        </ul>
-      </section>` : ''}
-      <section class="panel-section">
-        <div class="panel-section-label">Verdict</div>
-        <p style="font-size:13px;font-weight:600;color:var(--ink);margin:0;">${esc(recLabel(analysis.application_recommendation))}</p>
-      </section>
+      <div class="panel-col">
+        ${analysis.role_summary?.tldr ? `
+        <section class="panel-section">
+          <div class="panel-section-label">Role TL;DR</div>
+          <p style="font-size:13px;line-height:1.55;color:var(--ink-2);margin:0;">${esc(analysis.role_summary.tldr)}</p>
+        </section>` : ''}
+        ${scorecardHtml}
+        ${toolMatchHtml}
+        ${gapsEnhancedHtml}
+        ${standoutHtml}
+      </div>
     `;
 
     document.getElementById('panel-footer').innerHTML = '';
@@ -618,6 +680,18 @@
       titleEl.textContent = job.title ?? '—';
     }
     document.getElementById('panel-company').innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;">${pLogoHtml}<span>${esc(pComp)} · ${esc(job.location || '—')}</span></span>`;
+
+    // Role meta pills — sourced from the first available analysis's role_summary
+    const firstAnalysis = (() => {
+      const pls = job.pipelines || {};
+      const firstTag = Object.keys(pls)[0];
+      return firstTag ? (pls[firstTag]?.analysis || null) : (job.analysis || null);
+    })();
+    const rs = firstAnalysis?.role_summary || {};
+    const pillValues = [rs.domain, rs.seniority, rs.remote_policy].filter(Boolean);
+    document.getElementById('panel-pills').innerHTML = pillValues.length
+      ? pillValues.map(v => `<span class="panel-pill">${esc(v)}</span>`).join('')
+      : '';
 
     renderPanelBody(job, tag);
 
