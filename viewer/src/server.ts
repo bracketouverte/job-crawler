@@ -1292,21 +1292,30 @@ async function findNextSavedSearchJob(): Promise<{ job: JobRow; search: SavedSea
     });
     conditions.push("job_url IS NOT NULL");
     const where = `WHERE ${conditions.join(" AND ")}`;
-    const jobs = db
-      .prepare(
-        `SELECT provider, source_key, job_id, title, location, employment_type,
-                compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
-         FROM catalog_jobs ${where}
-         ORDER BY COALESCE(posted_at, first_seen_at) DESC`
-      )
-      .all(...params) as JobRow[];
+    const batchSize = 200;
+    let offset = 0;
+    while (true) {
+      const jobs = db
+        .prepare(
+          `SELECT provider, source_key, job_id, title, location, employment_type,
+                  compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+           FROM catalog_jobs ${where}
+           ORDER BY COALESCE(posted_at, first_seen_at) DESC
+           LIMIT ? OFFSET ?`
+        )
+        .all(...params, batchSize, offset) as JobRow[];
 
-    for (const job of jobs) {
-      const key = jobCacheKey(job);
-      if (hiddenJobs.has(key) || hasFullAnalysis(analysisCache[key])) {
-        continue;
+      if (jobs.length === 0) break;
+
+      for (const job of jobs) {
+        const key = jobCacheKey(job);
+        if (hiddenJobs.has(key) || hasFullAnalysis(analysisCache[key])) {
+          continue;
+        }
+        return { job, search };
       }
-      return { job, search };
+
+      offset += batchSize;
     }
   }
 
