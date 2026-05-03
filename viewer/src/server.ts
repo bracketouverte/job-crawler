@@ -446,6 +446,21 @@ async function readAnalysisCache(): Promise<AnalysisCache> {
 
 async function writeAnalysisCache(cache: AnalysisCache): Promise<void> {
   await writeFile(ANALYSIS_CACHE_PATH, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+  _analysisCacheValue = cache;
+  _analysisCacheTime = Date.now();
+}
+
+let _analysisCacheValue: AnalysisCache | null = null;
+let _analysisCacheTime = 0;
+const ANALYSIS_CACHE_TTL_MS = 5000;
+
+async function getAnalysisCache(): Promise<AnalysisCache> {
+  if (_analysisCacheValue !== null && Date.now() - _analysisCacheTime < ANALYSIS_CACHE_TTL_MS) {
+    return _analysisCacheValue;
+  }
+  _analysisCacheValue = await readAnalysisCache();
+  _analysisCacheTime = Date.now();
+  return _analysisCacheValue;
 }
 
 async function readHiddenJobs(): Promise<Set<string>> {
@@ -926,7 +941,7 @@ app.get("/api/jobs", async (req, res) => {
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   try {
-    const analysisCache = await readAnalysisCache();
+    const analysisCache = await getAnalysisCache();
     const total = (
       db.prepare(`SELECT COUNT(*) as n FROM catalog_jobs ${where}`).get(...params) as { n: number }
     ).n;
@@ -963,7 +978,7 @@ app.get("/api/job", async (req, res) => {
   const job = selectJobStatement.get(provider, source_key, job_id) as JobRow | undefined;
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   try {
-    const analysisCache = await readAnalysisCache();
+    const analysisCache = await getAnalysisCache();
     const cached = analysisCache[jobCacheKey(job)];
     res.json({ ...sanitizeJob(job), analysis: bestAnalysis(cached), pipelines: cached?.pipelines ?? {} });
   } catch (err) {
@@ -1279,7 +1294,7 @@ async function findNextSavedSearchJob(): Promise<{ job: JobRow; search: SavedSea
     return null;
   }
 
-  const analysisCache = await readAnalysisCache();
+  const analysisCache = await getAnalysisCache();
   const hiddenJobs = await readHiddenJobs();
 
   for (const search of searches) {
