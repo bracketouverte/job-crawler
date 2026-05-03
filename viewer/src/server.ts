@@ -1429,20 +1429,22 @@ async function runSavedSearchAnalyzerOnce(): Promise<void> {
 async function markOrphanedRunsFailed(): Promise<void> {
   try {
     const entries = await readdir(MATCH_RUNS_DIR);
-    for (const entry of entries) {
-      const manifestPath = join(MATCH_RUNS_DIR, entry, "manifest.json");
-      try {
-        const raw = await readFile(manifestPath, "utf8");
-        const manifest = JSON.parse(raw) as MatchRunManifest;
-        if (manifest.status === "running") {
-          await writeFile(
-            manifestPath,
-            `${JSON.stringify({ ...manifest, status: "failed", finished_at: new Date().toISOString(), error: "orphaned: server restarted" }, null, 2)}\n`,
-            "utf8",
-          );
-        }
-      } catch { /* skip unreadable manifests */ }
-    }
+    await Promise.all(
+      entries.map(async (entry: string) => {
+        const manifestPath = join(MATCH_RUNS_DIR, entry, "manifest.json");
+        try {
+          const raw = await readFile(manifestPath, "utf8");
+          const manifest = JSON.parse(raw) as MatchRunManifest;
+          if (manifest.status === "running") {
+            await writeFile(
+              manifestPath,
+              `${JSON.stringify({ ...manifest, status: "failed", finished_at: new Date().toISOString(), error: "orphaned: server restarted" }, null, 2)}\n`,
+              "utf8",
+            );
+          }
+        } catch { /* skip unreadable manifests */ }
+      }),
+    );
   } catch { /* match-runs dir may not exist yet */ }
 }
 
