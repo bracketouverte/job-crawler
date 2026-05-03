@@ -765,60 +765,88 @@ function buildJdText(parsed: ParsedJobPost, job: JobRow): string {
   return sections.join("\n\n");
 }
 
-async function writeBatchInput(runId: string, jobs: JobRow[], manifest: MatchRunManifest): Promise<MatchRunManifest> {
-  const lines: string[] = [];
-  let parsedCount = 0;
-  let failedCount = 0;
+const PARSE_CONCURRENCY = 6;
 
+async function writeBatchInput(runId: string, jobs: JobRow[], manifest: MatchRunManifest): Promise<MatchRunManifest> {
   await writeFile(matchRunLogPath(runId), "", "utf8");
 
-  for (const job of jobs) {
-    let parsed: ParsedJobPost = {};
-    let parseError: string | null = null;
-    const jobLabel = `${companyName(job)} | ${job.title ?? job.job_id}`;
+  // Parse all jobs concurrently with a concurrency cap, preserving original order.
+  let active = 0;
+  let next = 0;
+  const results: { parsed: ParsedJobPost; parseError: string | null }[] = new Array(jobs.length);
 
-    if (job.job_url) {
-      try {
-        await appendMatchRunLog(runId, `[parse] ${jobLabel} | start | url=${job.job_url}`);
-        parsed = await parseJobPost(job.job_url);
-        parsedCount += 1;
-        await appendMatchRunLog(
-          runId,
-          `[parse] ${jobLabel} | success | provider=${parsed.provider ?? job.provider} title=${parsed.title ?? job.title ?? "n/a"}`,
-        );
-        persistParsedMetadata(job, parsed);
-      } catch (error) {
-        parseError = error instanceof Error ? error.message : String(error);
-        failedCount += 1;
-        await appendMatchRunLog(runId, `[parse] ${jobLabel} | failed | ${parseError}`);
+  await new Promise<void>((resolve) => {
+    const trySchedule = (): void => {
+      while (active < PARSE_CONCURRENCY && next < jobs.length) {
+        const idx = next++;
+        const job = jobs[idx];
+        const jobLabel = `${companyName(job)} | ${job.title ?? job.job_id}`;
+        active++;
+
+        const task: Promise<void> = job.job_url
+          ? appendMatchRunLog(runId, `[parse] ${jobLabel} | start | url=${job.job_url}`)
+              .then(() => parseJobPost(job.job_url!))
+              .then(async (parsed) => {
+                await appendMatchRunLog(
+                  runId,
+                  `[parse] ${jobLabel} | success | provider=${parsed.provider ?? job.provider} title=${parsed.title ?? job.title ?? "n/a"}`,
+                );
+                persistParsedMetadata(job, parsed);
+                results[idx] = { parsed, parseError: null };
+              })
+              .catch(async (error) => {
+                const parseError = error instanceof Error ? error.message : String(error);
+                await appendMatchRunLog(runId, `[parse] ${jobLabel} | failed | ${parseError}`);
+                results[idx] = { parsed: {}, parseError };
+              })
+          : appendMatchRunLog(runId, `[parse] ${jobLabel} | failed | Missing job URL`).then(() => {
+              results[idx] = { parsed: {}, parseError: "Missing job URL" };
+            });
+
+        task.then(() => {
+          active--;
+          if (next < jobs.length) {
+            trySchedule();
+          } else if (active === 0) {
+            resolve();
+          }
+        });
       }
-    } else {
-      parseError = "Missing job URL";
-      failedCount += 1;
-      await appendMatchRunLog(runId, `[parse] ${jobLabel} | failed | ${parseError}`);
-    }
-
-    const payload = {
-      ...sanitizeJob(job),
-      title: parsed.title ?? job.title,
-      company: companyName(job),
-      location: parsed.location ?? job.location,
-      employment_type: parsed.employment_type ?? job.employment_type,
-      compensation: isRealCompensation(parsed.compensation) ? parsed.compensation : sanitizeJob(job).compensation,
-      workplace_type: parsed.workplace_type,
-      posted_datetime: parsed.posted_datetime ?? job.posted_at ?? job.updated_at ?? job.first_seen_at,
-      responsibilities: parsed.responsibilities ?? [],
-      requirements_summary: parsed.requirements_summary ?? [],
-      must_have_requirements: parsed.must_have_requirements ?? parsed.requirements_summary ?? [],
-      nice_to_have_requirements: parsed.nice_to_have_requirements ?? [],
-      technical_tools_mentioned: parsed.technical_tools_mentioned ?? [],
-      jd_concepts: parsed.jd_concepts ?? [],
-      job_url: job.job_url,
-      url: job.job_url,
-      jd_text: buildJdText(parsed, job),
-      parse_error: parseError,
+      if (next >= jobs.length && active === 0) resolve();
     };
-    lines.push(JSON.stringify(payload));
+    trySchedule();
+  });
+
+  let parsedCount = 0;
+  let failedCount = 0;
+  const lines: string[] = [];
+
+  for (let i = 0; i < jobs.length; i++) {
+    const job = jobs[i];
+    const { parsed, parseError } = results[i];
+    if (parseError) failedCount++; else parsedCount++;
+    lines.push(
+      JSON.stringify({
+        ...sanitizeJob(job),
+        title: parsed.title ?? job.title,
+        company: companyName(job),
+        location: parsed.location ?? job.location,
+        employment_type: parsed.employment_type ?? job.employment_type,
+        compensation: isRealCompensation(parsed.compensation) ? parsed.compensation : sanitizeJob(job).compensation,
+        workplace_type: parsed.workplace_type,
+        posted_datetime: parsed.posted_datetime ?? job.posted_at ?? job.updated_at ?? job.first_seen_at,
+        responsibilities: parsed.responsibilities ?? [],
+        requirements_summary: parsed.requirements_summary ?? [],
+        must_have_requirements: parsed.must_have_requirements ?? parsed.requirements_summary ?? [],
+        nice_to_have_requirements: parsed.nice_to_have_requirements ?? [],
+        technical_tools_mentioned: parsed.technical_tools_mentioned ?? [],
+        jd_concepts: parsed.jd_concepts ?? [],
+        job_url: job.job_url,
+        url: job.job_url,
+        jd_text: buildJdText(parsed, job),
+        parse_error: parseError,
+      }),
+    );
   }
 
   await writeFile(matchRunInputPath(runId), `${lines.join("\n")}\n`, "utf8");
