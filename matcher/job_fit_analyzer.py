@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime
 import re
 import time
+import random
 import requests
 
 try:
@@ -640,9 +641,10 @@ def calculate_fit(jd_text, system_prompt, api_key, model, job_label=None, profil
             log_progress(f"[match] {job_label or 'job'} | API error | attempt {attempt}/{MAX_RETRIES} | {e}")
 
         if attempt < MAX_RETRIES:
+            wait = min(60, (2 ** attempt) + random.uniform(0, 1))
             if job_label:
-                log_progress(f"[match] {job_label} | retrying in {attempt}s")
-            time.sleep(attempt)
+                log_progress(f"[match] {job_label} | retrying in {wait:.1f}s")
+            time.sleep(wait)
 
     if job_label:
         log_progress(f"[match] {job_label} | failed after {MAX_RETRIES} attempts")
