@@ -7,6 +7,7 @@
   let totalJobs = 0;
   let pageSize = 50;
   let debounceTimer = null;
+  let fetchJobsController = null;
   let logoDevPublishableKey = null;
   let hasLogoDevBrandSearch = false;
   let matcherEnabled = false;
@@ -1217,7 +1218,11 @@
   /* ── Filters ─────────────────────────────────────────────────── */
   function onFilterChange() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => fetchJobs(1), 250);
+    debounceTimer = setTimeout(() => {
+      if (fetchJobsController) fetchJobsController.abort();
+      fetchJobsController = new AbortController();
+      fetchJobs(1, fetchJobsController.signal);
+    }, 250);
   }
   ['filter-title','filter-location','filter-company','filter-days'].forEach(id => {
     document.getElementById(id).addEventListener('input', onFilterChange);
@@ -1284,7 +1289,7 @@
     return p;
   }
 
-  async function fetchJobs(page = 1) {
+  async function fetchJobs(page = 1, signal = null) {
     document.getElementById('loading-state').style.display = 'block';
     document.getElementById('jobs-list').style.display     = 'none';
     document.getElementById('empty-state').style.display   = 'none';
@@ -1302,7 +1307,7 @@
           });
           p.set('page', '1');
           p.set('limit', '200');
-          return fetch(`/api/jobs?${p}`).then(r => r.json());
+          return fetch(`/api/jobs?${p}`, signal ? { signal } : {}).then(r => r.json());
         }));
         const seen = new Set();
         const merged = [];
@@ -1325,7 +1330,7 @@
       } else {
         const params = buildSearchParams();
         params.set('page', String(page));
-        const res  = await fetch(`/api/jobs?${params}`);
+        const res  = await fetch(`/api/jobs?${params}`, signal ? { signal } : {});
         const data = await res.json();
         totalJobs   = data.total;
         pageSize    = data.pageSize;
@@ -1342,7 +1347,8 @@
       document.getElementById('loading-state').style.display = 'none';
       pushUrlState(currentPage);
       renderCurrentView();
-    } catch {
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
       document.getElementById('loading-state').innerHTML = '<div style="color:var(--danger)">Error loading jobs.</div>';
     }
   }
