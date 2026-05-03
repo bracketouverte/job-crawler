@@ -244,6 +244,52 @@
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  /* ── Card analysis block (TL;DR + tiny scorecard + pills) ──── */
+  const CARD_SC_LABELS = {
+    core_skills:           'Core',
+    relevant_experience:   'Exp.',
+    target_alignment:      'Target',
+    seniority_fit:         'Senior.',
+    workplace_fit:         'Culture',
+    requirements_coverage: 'Req.',
+  };
+  function cardAnalHtml(anal) {
+    const rs       = anal.role_summary || {};
+    const tldr     = rs.tldr || '';
+    const sc       = anal.scorecard || null;
+    const pills    = [rs.domain, rs.seniority, rs.remote_policy].filter(Boolean);
+
+    const tldrHtml = tldr
+      ? `<p class="card-tldr">${esc(tldr)}</p>`
+      : '';
+
+    const scHtml = sc ? `
+      <div class="card-sc">
+        ${Object.entries(CARD_SC_LABELS).map(([key, label]) => {
+          const dim = sc[key];
+          if (!dim) return '';
+          const s    = Number(dim.score || 0);
+          const pct  = Math.round((s / 5) * 100);
+          const tier = s >= 4 ? 'high' : s >= 3 ? 'mid' : 'low';
+          const tip  = dim.reason ? esc(dim.reason) : '';
+          return `<div class="card-sc-row" ${tip ? `title="${tip}"` : ''}>
+            <span class="card-sc-label">${esc(label)}</span>
+            <div class="sc-bar-wrap"><div class="sc-bar-fill" data-tier="${tier}" style="width:${pct}%"></div></div>
+            <span class="sc-score mono" data-tier="${tier}">${s.toFixed(1)}</span>
+          </div>`;
+        }).join('')}
+      </div>` : '';
+
+    const pillsHtml = pills.length
+      ? `<div class="card-pills">${pills.map(v => `<span class="panel-pill">${esc(v)}</span>`).join('')}</div>`
+      : '';
+
+    if (!tldrHtml && !scHtml && !pillsHtml) return '';
+    const leftHtml  = (tldrHtml || pillsHtml) ? `<div class="card-col-left">${tldrHtml}${pillsHtml}</div>` : '';
+    const rightHtml = scHtml ? `<div class="card-col-right">${scHtml}</div>` : '';
+    return `<div class="job-content">${leftHtml}${rightHtml}</div>`;
+  }
+
   /* ── Render jobs ─────────────────────────────────────────────── */
   function renderJobs(jobs) {
     const list = document.getElementById('jobs-list');
@@ -301,22 +347,7 @@
             </div>
           </div>
 
-          ${hasAnal ? `
-          <div class="job-content">
-            <div class="jc-block">
-              <div class="jc-label">Summary</div>
-              <p class="jc-text">${esc(anal.role_summary?.tldr || anal.standout_differentiator || '—')}</p>
-            </div>
-            <div class="jc-block">
-              <div class="jc-label">Verdict</div>
-              <p class="jc-text">${esc(recLabel(anal.application_recommendation))}</p>
-            </div>
-            <div class="jc-block">
-              <div class="jc-label">Gaps</div>
-              <p class="jc-text">${Array.isArray(anal.gaps) && anal.gaps.length ? esc(anal.gaps.map(g => g.gap || g).join(', ')) : '—'}</p>
-            </div>
-          </div>
-          ` : ''}
+          ${hasAnal ? cardAnalHtml(anal) : ''}
 
           <div class="job-footer"></div>
         </div>
@@ -1022,29 +1053,20 @@
           }
 
           // Update content blocks too
-          const anal    = updatedJob.analysis;
+          const anal       = updatedJob.analysis;
           const updScore   = Number(anal?.score_5 || 0);
           const updHasAnal = anal && updScore > 0;
-          const jobMain = card.querySelector('.job-main');
+          const jobMain    = card.querySelector('.job-main');
           const existingContent = card.querySelector('.job-content');
           if (updHasAnal && jobMain) {
-            const newContent = document.createElement('div');
-            newContent.className = 'job-content';
-            newContent.innerHTML = `
-              <div class="jc-block">
-                <div class="jc-label">Summary</div>
-                <p class="jc-text">${esc(anal.role_summary?.tldr || anal.standout_differentiator || '—')}</p>
-              </div>
-              <div class="jc-block">
-                <div class="jc-label">Verdict</div>
-                <p class="jc-text">${esc(recLabel(anal.application_recommendation))}</p>
-              </div>
-              <div class="jc-block">
-                <div class="jc-label">Gaps</div>
-                <p class="jc-text">${Array.isArray(anal.gaps) && anal.gaps.length ? esc(anal.gaps.map(g => g.gap || g).join(', ')) : '—'}</p>
-              </div>`;
-            if (existingContent) existingContent.replaceWith(newContent);
-            else jobMain.querySelector('.job-footer')?.before(newContent);
+            const html = cardAnalHtml(anal);
+            if (html) {
+              const tmp = document.createElement('div');
+              tmp.innerHTML = html;
+              const newContent = tmp.firstElementChild;
+              if (existingContent) existingContent.replaceWith(newContent);
+              else jobMain.querySelector('.job-footer')?.before(newContent);
+            }
           }
         }
 

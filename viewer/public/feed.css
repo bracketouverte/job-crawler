@@ -424,26 +424,54 @@ body {
 /* JD content blocks */
 .job-content {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr auto;
   gap: 16px;
+  align-items: start;
 }
-.jc-block { min-width: 0; }
-.jc-label {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  font-weight: 600;
-  margin-bottom: 6px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+.card-col-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
-.jc-text {
+.card-col-right {
+  min-width: 0;
+}
+.card-tldr {
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--ink-2);
   margin: 0;
 }
-.jc-tools { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.card-sc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.card-sc-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 28px;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+.card-sc-label {
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+.card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
 .tool-chip {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 11px;
@@ -1388,6 +1416,7 @@ body {
   .job-rail { padding-left: 0; border-left: none; border-top: 1px dashed var(--line); padding-top: 14px; align-items: flex-start; }
   .job-card.fav .job-rail { border-top-color: var(--accent-line); }
   .company-row { justify-content: flex-start; }
+  .card-sc-row { grid-template-columns: 48px 1fr 28px; }
   .job-content { grid-template-columns: 1fr; }
   .side-panel { width: 100vw; }
   .filters-grid { grid-template-columns: 1fr; }

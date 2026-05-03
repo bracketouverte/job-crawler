@@ -55,16 +55,27 @@ fi
 
 # Write crontab with resolved PROJECT_DIR (crond doesn't expand env vars)
 cat > /etc/crontabs/root <<EOF
-0 8,10,12,14,16,18,20 * * * PROJECT_DIR="${PROJECT_DIR}" /entrypoint.sh cron >> /var/log/scheduler.log 2>&1
+0 8,10,12,14,16,18,20 * * 1-5 PROJECT_DIR="${PROJECT_DIR}" /entrypoint.sh cron >> /var/log/scheduler.log 2>&1
+0 8,14 * * 6 PROJECT_DIR="${PROJECT_DIR}" /entrypoint.sh cron >> /var/log/scheduler.log 2>&1
+0 8 * * 0 PROJECT_DIR="${PROJECT_DIR}" /entrypoint.sh cron >> /var/log/scheduler.log 2>&1
 EOF
 
-# On container start: run immediately if in 8-20 window, then start crond
+# On container start: run immediately if in active window, then start crond
 hour=$(date +%H | sed 's/^0*//' | grep . || echo 0)
-if [ "$hour" -ge 8 ] && [ "$hour" -le 20 ]; then
-  echo "[SCHEDULER] In window (hour=$hour), checking last run..."
+dow=$(date +%u)  # 1=Monday ... 6=Saturday, 7=Sunday
+in_window=0
+if [ "$dow" -ge 1 ] && [ "$dow" -le 5 ] && [ "$hour" -ge 8 ] && [ "$hour" -le 20 ]; then
+  in_window=1
+elif [ "$dow" -eq 6 ] && { [ "$hour" -eq 8 ] || [ "$hour" -eq 14 ]; }; then
+  in_window=1
+elif [ "$dow" -eq 7 ] && [ "$hour" -eq 8 ]; then
+  in_window=1
+fi
+if [ "$in_window" -eq 1 ]; then
+  echo "[SCHEDULER] In window (dow=$dow hour=$hour), checking last run..."
   maybe_run
 else
-  echo "[SCHEDULER] Outside window (hour=$hour), skipping startup run."
+  echo "[SCHEDULER] Outside window (dow=$dow hour=$hour), skipping startup run."
 fi
 
 echo "[SCHEDULER] Starting crond..."
