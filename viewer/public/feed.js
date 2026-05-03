@@ -17,8 +17,22 @@
   let autoAnalyzerLastActive = false;
   let autoAnalyzerToastSig = null;
 
+  const LOGO_BRAND_CACHE_MAX = 2000;
   const logoDevBrandDomains = new Map();
   const logoDevBrandLookupsInFlight = new Set();
+  function logoBrandGet(key) {
+    if (!logoDevBrandDomains.has(key)) return undefined;
+    const val = logoDevBrandDomains.get(key);
+    logoDevBrandDomains.delete(key);
+    logoDevBrandDomains.set(key, val);
+    return val;
+  }
+  function logoBrandSet(key, val) {
+    if (logoDevBrandDomains.has(key)) logoDevBrandDomains.delete(key);
+    else if (logoDevBrandDomains.size >= LOGO_BRAND_CACHE_MAX)
+      logoDevBrandDomains.delete(logoDevBrandDomains.keys().next().value);
+    logoDevBrandDomains.set(key, val);
+  }
 
   const HIDDEN_KEY        = 'job-viewer:hidden';
   const VISITED_KEY       = 'job-viewer:visited';
@@ -86,13 +100,13 @@
   function hasLogo() { return typeof logoDevPublishableKey === 'string' && logoDevPublishableKey.length > 0; }
   function logoUrl(company) {
     if (!hasLogo()) return null;
-    const cached = logoDevBrandDomains.get(normCompany(company));
+    const cached = logoBrandGet(normCompany(company));
     if (cached) return `https://img.logo.dev/${encodeURIComponent(cached)}?token=${encodeURIComponent(logoDevPublishableKey)}&size=32&format=png&fallback=404`;
     const name = encodeURIComponent(String(company || '').trim());
     return `https://img.logo.dev/name/${name}?token=${encodeURIComponent(logoDevPublishableKey)}&size=32&format=png&fallback=404`;
   }
   function companyWebsite(company) {
-    const d = logoDevBrandDomains.get(normCompany(company));
+    const d = logoBrandGet(normCompany(company));
     return d ? `https://${d}` : null;
   }
   function ensureBrand(company) {
@@ -104,9 +118,9 @@
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         const d = typeof data?.domain === 'string' && data.domain.trim() ? data.domain.trim() : null;
-        logoDevBrandDomains.set(k, d);
+        logoBrandSet(k, d);
       })
-      .catch(() => logoDevBrandDomains.set(k, null))
+      .catch(() => logoBrandSet(k, null))
       .finally(() => { logoDevBrandLookupsInFlight.delete(k); renderCurrentView(); });
   }
 
