@@ -76,17 +76,43 @@ _AMBIGUOUS_STATE_CODES: set[str] = {"ID", "IN", "ME", "OR", "OK", "IL", "AL", "D
 # Technical tools registry
 # ---------------------------------------------------------------------------
 
-TECH_TOOL_PATTERNS: list[str] = [
-    r"\b(?:SQL|Python|JavaScript|TypeScript|Java|C#|C\+\+|Go|Golang|Ruby|PHP|Scala|Kotlin|Swift|R)\b",
-    r"\b(?:React|Vue|Angular|Node\.?js|Next\.?js|Nuxt|Django|Flask|FastAPI|Rails|Spring|GraphQL|REST|gRPC|tRPC)\b",
-    r"\b(?:AWS|Azure|GCP|Google Cloud|Kubernetes|Docker|Terraform|Datadog|New Relic|Prometheus|Grafana|ELK|ElasticSearch|OpenSearch)\b",
-    r"\b(?:PostgreSQL|Postgres|MySQL|MongoDB|Redis|Snowflake|BigQuery|Redshift|Kafka|Spark|dbt|Looker|Tableau|Power BI|Databricks)\b",
-    r"\b(?:Salesforce|HubSpot|Zendesk|Jira|Confluence|Figma|Amplitude|Mixpanel|Segment|GA4|Google Analytics|Intercom|Pendo)\b",
-    r"\b(?:OpenAI|Anthropic|Claude|GPT-?\d*|LLM|LLMOps|LangChain|LlamaIndex|RAG|vector database|Pinecone|Weaviate|Chroma|Qdrant)\b",
-    r"\b(?:SAP|Workday|NetSuite|Oracle|Stripe|Twilio|SendGrid|Snowplow|ATS|CRM|CMS|ERP)\b",
-    r"\b(?:GitHub|GitLab|Bitbucket|Jenkins|CircleCI|GitHub Actions|ArgoCD|Helm|Ansible)\b",
-    r"\b(?:Notion|Slack|Linear|Asana|Monday\.com|ClickUp|Miro|Productboard|Aha!)\b",
+_TECH_TOOL_TERMS: list[str] = [
+    # Languages
+    "SQL", "Python", "JavaScript", "TypeScript", "Java", "C#", r"C\+\+", "Go", "Golang",
+    "Ruby", "PHP", "Scala", "Kotlin", "Swift", "R",
+    # Frameworks / APIs
+    r"React", r"Vue", r"Angular", r"Node\.?js", r"Next\.?js", "Nuxt", "Django", "Flask",
+    "FastAPI", "Rails", "Spring", "GraphQL", "REST", "gRPC", "tRPC",
+    # Cloud / infra
+    "AWS", "Azure", "GCP", "Google Cloud", "Kubernetes", "Docker", "Terraform",
+    "Datadog", "New Relic", "Prometheus", "Grafana", "ELK", "ElasticSearch", "OpenSearch",
+    # Data
+    "PostgreSQL", "Postgres", "MySQL", "MongoDB", "Redis", "Snowflake", "BigQuery",
+    "Redshift", "Kafka", "Spark", "dbt", "Looker", "Tableau", "Power BI", "Databricks",
+    # Business tools
+    "Salesforce", "HubSpot", "Zendesk", "Jira", "Confluence", "Figma", "Amplitude",
+    "Mixpanel", "Segment", "GA4", "Google Analytics", "Intercom", "Pendo",
+    # AI / ML
+    r"OpenAI", "Anthropic", "Claude", r"GPT-?\d*", "LLM", "LLMOps", "LangChain",
+    "LlamaIndex", "RAG", "vector database", "Pinecone", "Weaviate", "Chroma", "Qdrant",
+    # Enterprise
+    "SAP", "Workday", "NetSuite", "Oracle", "Stripe", "Twilio", "SendGrid", "Snowplow",
+    "ATS", "CRM", "CMS", "ERP",
+    # DevOps / VCS
+    "GitHub Actions", "GitHub", "GitLab", "Bitbucket", "Jenkins", "CircleCI",
+    "ArgoCD", "Helm", "Ansible",
+    # Productivity
+    r"Monday\.com", "Notion", "Slack", "Linear", "Asana", "ClickUp", "Miro",
+    "Productboard", r"Aha!",
 ]
+
+# Longer alternatives must come before shorter prefixes (e.g. "GitHub Actions" before "GitHub")
+# so the first match wins and we don't split a two-word term. The list above is already ordered
+# that way; we compile once at import time.
+_TECH_TOOLS_RE = re.compile(
+    r"\b(?:" + "|".join(_TECH_TOOL_TERMS) + r")\b",
+    flags=re.I,
+)
 
 # Heading patterns for requirement classification
 _NICE_TO_HAVE_HEADING_RE = re.compile(
@@ -180,16 +206,15 @@ def extract_tools(text: str, limit: int = 40) -> list[str]:
     """Extract technical tool names from arbitrary text using regex patterns."""
     found: list[str] = []
     seen: set[str] = set()
-    for pattern in TECH_TOOL_PATTERNS:
-        for match in re.finditer(pattern, str(text or ""), flags=re.I):
-            tool = " ".join(match.group(0).split()).strip(" .,;:()[]")
-            key = _normalize_key(tool)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            found.append(tool)
-            if len(found) >= limit:
-                return found
+    for match in _TECH_TOOLS_RE.finditer(str(text or "")):
+        tool = " ".join(match.group(0).split()).strip(" .,;:()[]")
+        key = _normalize_key(tool)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        found.append(tool)
+        if len(found) >= limit:
+            break
     return found
 
 
