@@ -37,6 +37,8 @@ services:
   viewer:
     build:
       context: ./viewer
+    depends_on:
+      - scheduler
     env_file:
       - path: ./.env
         required: false
