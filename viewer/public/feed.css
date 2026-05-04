@@ -388,6 +388,25 @@ body {
   vertical-align: middle;
 }
 
+.job-loc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  flex-wrap: wrap;
+}
+.loc-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+}
+.job-card.fav .loc-pill { background: rgba(255,255,255,0.7); }
+
 .job-meta-row {
   display: flex;
   align-items: center;

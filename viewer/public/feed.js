@@ -156,6 +156,18 @@
   }
 
   /* ── Work mode ───────────────────────────────────────────────── */
+  function locationLabel(job, mode) {
+    const raw = String(job.location || '').trim();
+    if (!raw) return '';
+    const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) return '';
+    if (mode === 'Remote') {
+      return parts[parts.length - 1];
+    }
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]}, ${parts[parts.length - 1]}`;
+  }
+
   function workMode(job, analysis) {
     const rp = String(analysis?.role_summary?.remote_policy || '').toLowerCase();
     const loc = String(job.location || '').toLowerCase();
@@ -336,10 +348,16 @@
               ${job.job_url
                 ? `<a class="job-title js-visit" href="${esc(job.job_url)}" target="_blank" rel="noopener">${esc(job.title ?? '—')}<span class="ext" aria-hidden="true">↗</span></a>${vis ? '<span class="visited-flag">Viewed</span>' : ''}`
                 : `<span class="job-title">${esc(job.title ?? '—')}</span>`}
+              ${(() => {
+                const locLabel = locationLabel(job, mode);
+                if (!locLabel) return '';
+                return `<div class="job-loc-row">
+                  <span class="mode-pill" data-mode="${esc(mode)}"><span class="swatch"></span>${esc(mode)}</span>
+                  <span class="loc-pill">${esc(locLabel)}</span>
+                </div>`;
+              })()}
               <div class="job-meta-row">
                 ${jdMeta ? `${jdMeta}<span class="dot"></span>` : ''}
-                <span class="mode-pill" data-mode="${esc(mode)}"><span class="swatch"></span>${esc(mode)}</span>
-                <span class="dot"></span>
                 <span class="ats-pill">${esc(job.provider || '—')}</span>
                 <span class="dot"></span>
                 ${ageBadgeHtml(job.posted_at || job.first_seen_at)}
