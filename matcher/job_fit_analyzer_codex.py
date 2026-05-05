@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover
     from .matching_intelligence_codex import build_match_context, build_profile_text, format_match_context
 
 # ============ CONFIGURATION ============
-NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NVIDIA_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_MODEL = "meta/llama-4-maverick-17b-128e-instruct"
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_PROFILE_DIR = os.environ.get("CAREER_OPS_DIR", "career-ops")
@@ -124,6 +124,16 @@ Check B — Domain match:
 - If the JD treats domain experience as a must-have (explicit requirement, specialist firm, or domain-specific regulation/tooling that cannot transfer) AND the candidate has no direct experience in that domain → cap `relevant_experience` score at 2.0. Add to `blockers`: "Domain mismatch: role requires [detected domain] experience — candidate has none."
 - If domain experience is preferred but not required, or the candidate's experience is genuinely transferable, do not cap — reflect the gap in the score naturally (e.g. 2.5–3.5) with a reason.
 - Adjacent experience belongs ONLY in `mitigation`. It does not raise a capped score.
+
+Check B2 — Hard requirement with no CV evidence:
+- Scan the JD for any requirement phrased with hard-requirement language ("required", "must have", "mandatory", "you must have", "X+ years of [specific thing]") where the candidate's CV contains ZERO direct evidence — not adjacent, not transferable.
+- This applies to any type of hard requirement: domain/industry experience, specific platform ownership, process expertise, certifications, etc.
+- For each such unmet hard requirement with no mitigation path:
+  - In `requirement_match`, record `is_blocker: true`, `gap_type: "direct_gap"`, `strength: "missing"`, `mitigation: ""`.
+  - Cap `relevant_experience` at 2.5.
+  - Add to `blockers`: "Hard requirement unmet: [requirement text] — no direct evidence in profile."
+- Exception — do NOT cap if ALL of the following are true: (a) the JD uses softening language ("or equivalent", "preferred"), (b) the candidate has a concrete transferable substitute, AND (c) you can write a specific mitigation. In that case, set `mitigation` with the concrete path and score 3.0–3.5.
+- A mitigation field must describe a real bridge, not a generic "fast learner" claim.
 
 Check C — Explicit must-have requirements with no CV evidence:
 - Scan the JD for requirements phrased as hard requirements: "X+ years of [specific skill/function]", "required", "must have", "experience with [specific platform/domain]".
@@ -524,6 +534,48 @@ def add_gap_once(analysis, gap):
         analysis.setdefault("gaps", []).append(gap)
 
 
+def _enforce_hard_blocker_guardrail(analysis):
+    """Cap relevant_experience when the LLM flagged a requirement as a hard blocker with no mitigation.
+
+    Fires on structure alone — no domain keyword list. Any requirement marked
+    is_blocker=true + gap_type=direct_gap + strength=missing + no mitigation path
+    is treated as a disqualifying gap regardless of what domain or skill it names.
+    """
+    requirement_match = analysis.get("requirement_match") or []
+    scorecard = analysis.get("scorecard") or {}
+    rel_exp = scorecard.get("relevant_experience")
+    if not isinstance(rel_exp, dict):
+        return
+
+    for item in requirement_match:
+        if not isinstance(item, dict):
+            continue
+        if not item.get("is_blocker"):
+            continue
+        if item.get("gap_type") != "direct_gap":
+            continue
+        if item.get("strength") != "missing":
+            continue
+        if item.get("mitigation", "").strip():
+            continue
+        current_score = float(rel_exp.get("score", 5.0) or 5.0)
+        if current_score > 2.5:
+            rel_exp["score"] = 2.5
+            rel_exp["reason"] = (
+                rel_exp.get("reason", "")
+                + " [Guardrail] Hard requirement with no CV evidence and no mitigation path — capped at 2.5."
+            ).strip()
+        blocker_text = f"Hard requirement unmet: {item.get('requirement', 'required experience')} — no direct evidence in profile."
+        if not any(blocker_text.lower()[:40] in str(b).lower() for b in analysis.get("blockers", [])):
+            analysis.setdefault("blockers", []).append(blocker_text)
+        add_gap_once(analysis, {
+            "gap": blocker_text,
+            "severity": "high",
+            "blocker": True,
+            "mitigation": "",
+        })
+
+
 def apply_match_guardrails(analysis, match_context):
     location = ((match_context or {}).get("matches") or {}).get("location") or {}
     status = location.get("status")
@@ -544,6 +596,8 @@ def apply_match_guardrails(analysis, match_context):
         if isinstance(workplace, dict):
             workplace["score"] = min(float(workplace.get("score", 3.0) or 3.0), 1.5)
             workplace["reason"] = reason or "Structured location check found the role incompatible."
+
+    _enforce_hard_blocker_guardrail(analysis)
 
     if not analysis.get("tool_match"):
         analysis["tool_match"] = [
@@ -598,7 +652,7 @@ def calculate_fit(jd_text, system_prompt, api_key, model, job_label=None, profil
         try:
             if job_label:
                 log_progress(f"[match] {job_label} | calling NVIDIA NIM | attempt {attempt}/{MAX_RETRIES}")
-            response = requests.post(NVIDIA_URL, headers=headers, json=payload, timeout=60)
+            response = requests.post(f"{NVIDIA_URL}/chat/completions", headers=headers, json=payload, timeout=60)
             response.raise_for_status()
 
             result = response.json()

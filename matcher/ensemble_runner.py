@@ -27,14 +27,46 @@ BASE_DIR = Path(__file__).parent
 DEFAULT_PROFILE_DIR = "career-ops"
 
 API_KEY = os.environ.get("NVIDIA_API_KEY", "").strip()
-URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
-SCORERS = [
+
+def chat_completions_url():
+    explicit_url = (
+        os.environ.get("NVIDIA_CHAT_COMPLETIONS_URL")
+        or os.environ.get("NVIDIA_NIM_CHAT_COMPLETIONS_URL")
+    )
+    if explicit_url:
+        return explicit_url.strip().rstrip("/")
+
+    base_url = (
+        os.environ.get("NVIDIA_BASE_URL")
+        or os.environ.get("NVIDIA_NIM_BASE_URL")
+        or DEFAULT_NVIDIA_BASE_URL
+    ).strip().rstrip("/")
+    if base_url.endswith("/chat/completions"):
+        return base_url
+    return f"{base_url}/chat/completions"
+
+
+CHAT_COMPLETIONS_URL = chat_completions_url()
+DEFAULT_SCORERS = [
     "meta/llama-4-maverick-17b-128e-instruct",
     "moonshotai/kimi-k2-instruct",
-    "deepseek-ai/deepseek-v3.2",
+    "deepseek-ai/deepseek-v4-flash",
 ]
-SYNTHESIZER = "deepseek-ai/deepseek-v3.2"
+DEFAULT_SYNTHESIZER = "deepseek-ai/deepseek-v4-flash"
+
+
+def csv_env(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    values = [item.strip() for item in raw.split(",") if item.strip()]
+    return values or default
+
+
+SCORERS = csv_env("NVIDIA_ENSEMBLE_SCORERS", DEFAULT_SCORERS)
+SYNTHESIZER = os.environ.get("NVIDIA_ENSEMBLE_SYNTHESIZER", DEFAULT_SYNTHESIZER).strip() or DEFAULT_SYNTHESIZER
 
 _PRE_SCORING_CHECKS = """
 === PRE-SCORING CHECKS (apply before assigning dimension scores) ===
@@ -157,10 +189,12 @@ def call_model(model, system, user_content, max_tokens=2000, temperature=0.2, re
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if model.startswith("deepseek-ai/deepseek-v4"):
+        payload["reasoning_effort"] = os.environ.get("NVIDIA_DEEPSEEK_REASONING_EFFORT", "none")
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     for attempt in range(1, retries + 1):
         try:
-            r = requests.post(URL, headers=headers, json=payload, timeout=180)
+            r = requests.post(CHAT_COMPLETIONS_URL, headers=headers, json=payload, timeout=180)
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
         except Exception as e:
@@ -326,6 +360,7 @@ def process_batch(input_file, output_file, profile_text, profile_data=None, pipe
             title = job.get("title", "?")
             job_label = f"#{i} {source_key} | {title}"
             jd_text = job.get("jd_text", "").strip()
+            jd_parse_error = job.get("parse_error") or None
 
             if not jd_text:
                 log(f"[ensemble-batch] {job_label} | empty jd_text")
@@ -359,6 +394,7 @@ def process_batch(input_file, output_file, profile_text, profile_data=None, pipe
                     "standout_differentiator": synthesis.get("remarques", ""),
                     "remarques": synthesis.get("remarques", ""),
                     "pipeline": pipeline_tag,
+                    **({"jd_parse_error": jd_parse_error} if jd_parse_error else {}),
                 }
                 analysis = apply_match_guardrails(analysis, match_context)
                 score_100 = analysis["score"]
