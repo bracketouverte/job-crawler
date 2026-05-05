@@ -479,6 +479,7 @@ def process_batch(input_file, output_file, profile_text, profile_data=None, pipe
                     "status": "ok",
                     "elapsed": round(time.time() - t0, 1),
                     "analysis": analysis,
+                    **({"jd_parse_error": jd_parse_error} if jd_parse_error else {}),
                 }
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
                 succeeded += 1
