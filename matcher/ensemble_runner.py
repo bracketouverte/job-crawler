@@ -239,6 +239,74 @@ def remove_location_false_positives(analysis):
     ]
 
 
+_CONSULTING_SIGNALS = (
+    "billable hours", "client delivery", "client engagement", "placed at client",
+    "work at client", "on-site at client", "client-facing delivery", "consulting firm",
+    "professional services firm", "staffing firm", "accenture", "mckinsey", "deloitte",
+    "bcg", "bain", "kpmg", "pwc", "ernst & young", "big 4", "boutique consulting",
+)
+
+
+_TOOL_BLOCKER_PATTERNS = re.compile(
+    r'\b(unmet hard requirement|hard requirement unmet|missing.*tool|tooling gap|no.*experience with|lacks.*experience with)\b',
+    re.IGNORECASE,
+)
+_SOFTENED_TOOL_PATTERN = re.compile(
+    r'(?:tools?\s+(?:like|such as|including)|familiarity with|experience with tools like)\s+(\w[\w\s\-\.]+)',
+    re.IGNORECASE,
+)
+
+
+def _remove_softened_tool_blockers(analysis, jd_text):
+    """Strip tool-name blockers when the JD uses softening language for that tool."""
+    jd_lower = (jd_text or "").lower()
+    softened_tools = set()
+    for m in _SOFTENED_TOOL_PATTERN.finditer(jd_lower):
+        softened_tools.update(w.strip() for w in m.group(1).split(",") if len(w.strip()) > 2)
+    if not softened_tools:
+        return
+    kept_blockers = []
+    demoted = []
+    for b in analysis.get("blockers", []):
+        b_lower = str(b).lower()
+        if _TOOL_BLOCKER_PATTERNS.search(b_lower) and any(tool in b_lower for tool in softened_tools):
+            demoted.append(b)
+        else:
+            kept_blockers.append(b)
+    if not demoted:
+        return
+    analysis["blockers"] = kept_blockers
+    gaps = analysis.setdefault("gaps", [])
+    existing = {str(g.get("gap", "")).strip().lower() for g in gaps if isinstance(g, dict)}
+    for b in demoted:
+        gap_text = str(b).replace("Unmet hard requirement: ", "Tool ramp-up: ").replace("Hard requirement unmet: ", "Tool ramp-up: ")
+        if gap_text.lower() not in existing:
+            gaps.append({"gap": gap_text, "severity": "low", "blocker": False,
+                         "mitigation": "JD uses softening language ('tools like X') — direct tool experience not strictly required."})
+
+
+def _remove_consulting_false_positive(analysis, jd_text):
+    """Strip Check A blocker if the JD contains no explicit consulting signals."""
+    consulting_blocker_prefix = "job type: consulting"
+    blockers = analysis.get("blockers", [])
+    has_blocker = any(consulting_blocker_prefix in str(b).lower() for b in blockers)
+    if not has_blocker:
+        return
+    jd_lower = (jd_text or "").lower()
+    if any(sig in jd_lower for sig in _CONSULTING_SIGNALS):
+        return
+    analysis["blockers"] = [b for b in blockers if consulting_blocker_prefix not in str(b).lower()]
+    analysis["gaps"] = [
+        g for g in analysis.get("gaps", [])
+        if consulting_blocker_prefix not in str(g.get("gap", "")).lower()
+    ]
+    scorecard = analysis.get("scorecard") or {}
+    target = scorecard.get("target_alignment")
+    if isinstance(target, dict) and float(target.get("score", 5.0) or 5.0) <= 2.0:
+        target["score"] = 3.5
+        target["reason"] = "[Guardrail] Check A false positive removed — no explicit consulting signals in JD."
+
+
 def apply_match_guardrails(analysis, match_context):
     location = ((match_context or {}).get("matches") or {}).get("location") or {}
     status = location.get("status")
@@ -260,6 +328,9 @@ def apply_match_guardrails(analysis, match_context):
             workplace["reason"] = reason or "Structured location check found the role incompatible."
         if not any(item.get("gap") == blocker for item in analysis.get("gaps", [])):
             analysis.setdefault("gaps", []).append({"gap": blocker, "severity": "high", "blocker": True, "mitigation": ""})
+
+    _remove_consulting_false_positive(analysis, (match_context or {}).get("_jd_text", ""))
+    _remove_softened_tool_blockers(analysis, (match_context or {}).get("_jd_text", ""))
 
     if not analysis.get("tool_match"):
         analysis["tool_match"] = [
@@ -289,6 +360,7 @@ def ensemble_analyze(jd_text, profile_text, job_label, profile_data=None):
         match_context = build_match_context_from_profile_data(jd_text, profile_data)
     else:
         match_context = build_match_context(jd_text, profile_text)
+    match_context["_jd_text"] = jd_text
     system_with_profile = SCORER_SYSTEM + "\n\nCandidate profile:\n" + profile_text
     user_msg = (
         "Structured candidate/JD match context:\n\n"
