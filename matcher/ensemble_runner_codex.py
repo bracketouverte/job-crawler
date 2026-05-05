@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).parent
 DEFAULT_PROFILE_DIR = "career-ops"
 
 API_KEY = os.environ.get("NVIDIA_API_KEY", "").strip()
-URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+URL = "https://integrate.api.nvidia.com/v1"
 
 SCORERS = [
     "meta/llama-4-maverick-17b-128e-instruct",
@@ -156,7 +156,7 @@ def call_model(model, system, user_content, max_tokens=2000, temperature=0.2, re
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     for attempt in range(1, retries + 1):
         try:
-            r = requests.post(URL, headers=headers, json=payload, timeout=180)
+            r = requests.post(f"{URL}/chat/completions", headers=headers, json=payload, timeout=180)
             r.raise_for_status()
             return r.json()["choices"][0]["message"]["content"]
         except Exception as e:
