@@ -1440,3 +1440,85 @@ body {
   .side-panel { width: 100vw; }
   .filters-grid { grid-template-columns: 1fr; }
 }
+
+/* ── JD parse warning banner ────────────────────────────────── */
+.jd-parse-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: color-mix(in srgb, #f59e0b 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-bottom: 12px;
+}
+.jd-parse-warning-icon { font-size: 14px; flex-shrink: 0; }
+.jd-parse-warning span:nth-child(2) { flex: 1; }
+.btn-xs { padding: 3px 10px; font-size: 11px; flex-shrink: 0; }
+
+/* ── Paste JD modal ─────────────────────────────────────────── */
+.paste-jd-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.paste-jd-modal {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  width: min(560px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.25);
+}
+.paste-jd-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.paste-jd-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+}
+.paste-jd-close:hover { color: var(--ink); }
+.paste-jd-hint {
+  font-size: 12px;
+  color: var(--ink-2);
+  margin: 0;
+  line-height: 1.5;
+}
+.paste-jd-textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+.paste-jd-textarea:focus { outline: none; border-color: var(--accent); }
+.paste-jd-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

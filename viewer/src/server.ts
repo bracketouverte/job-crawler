@@ -589,7 +589,12 @@ async function persistRunResults(runId: string, results: Array<Record<string, un
     const pipelineTag = String((row.analysis as Record<string, unknown>)?.pipeline ?? "maverick");
     const existing = cache[key] ?? { pipelines: {} };
     if (!existing.pipelines) existing.pipelines = {};
-    existing.pipelines[pipelineTag] = { analysis: row.analysis ?? null, analyzed_at: analyzedAt, run_id: runId };
+    existing.pipelines[pipelineTag] = {
+      analysis: row.analysis ?? null,
+      analyzed_at: analyzedAt,
+      run_id: runId,
+      ...(row.jd_parse_error ? { jd_parse_error: String(row.jd_parse_error) } : {}),
+    };
     cache[key] = existing;
     notificationTasks.push(notifyDiscordForScore(row, runId));
   }
@@ -870,6 +875,33 @@ async function writeBatchInput(runId: string, jobs: JobRow[], manifest: MatchRun
     parsed_count: parsedCount,
     failed_count: failedCount,
   };
+}
+
+async function executeMatchRunFromInput(runId: string, mode?: string): Promise<void> {
+  const manifest = await readManifest(runId);
+  if (manifest === null) return;
+  activeRunIds.add(runId);
+  try {
+    await writeManifest({ ...manifest, status: "running", started_at: new Date().toISOString() });
+    await writeFile(matchRunLogPath(runId), "", "utf8");
+    const isEnsemble = mode === "claude-ensemble";
+    const script = isEnsemble ? join(MATCHER_DIR, "ensemble_runner.py") : join(MATCHER_DIR, "job_fit_analyzer.py");
+    const pipelineTag = isEnsemble ? "claude-ensemble" : "claude";
+    await runCommand(PYTHON_BIN, [script, "--jobs-jsonl", matchRunInputPath(runId), "--results-jsonl",
+      matchRunResultsPath(runId), "--profile-dir", join(MATCHER_DIR, CAREER_OPS_DIR), "--pipeline", pipelineTag],
+      { env: process.env, logPrefix: `match-run ${runId}`, logFile: matchRunLogPath(runId) });
+    const results = await readJsonl(matchRunResultsPath(runId)) as Array<Record<string, unknown>>;
+    const matchedCount = results.filter((row) => row.status === "ok").length;
+    await persistRunResults(runId, results);
+    await writeManifest({ ...manifest, status: "completed", finished_at: new Date().toISOString(),
+      matched_count: matchedCount, failed_count: results.length - matchedCount });
+  } catch (err) {
+    console.error(`executeMatchRunFromInput ${runId} error:`, err);
+    await writeManifest({ ...manifest, status: "failed", finished_at: new Date().toISOString(),
+      error: err instanceof Error ? err.message : String(err) });
+  } finally {
+    activeRunIds.delete(runId);
+  }
 }
 
 async function executeMatchRun(runId: string, jobs: JobRow[], mode?: string): Promise<void> {
@@ -1156,6 +1188,58 @@ app.post("/api/match-runs", async (req, res) => {
     });
   } catch (error) {
     console.error("/api/match-runs error:", error);
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/match-runs-with-jd", async (req, res) => {
+  const { provider, source_key, job_id, jd_text, mode } = req.body as {
+    provider?: string; source_key?: string; job_id?: string; jd_text?: string; mode?: string;
+  };
+  if (!provider || !source_key || !job_id) {
+    res.status(400).json({ error: "provider, source_key, and job_id are required" });
+    return;
+  }
+  if (!jd_text || !jd_text.trim()) {
+    res.status(400).json({ error: "jd_text is required" });
+    return;
+  }
+  const job = selectJobStatement.get(provider, source_key, job_id) as JobRow | undefined;
+  if (!job) { res.status(404).json({ error: "Job not found" }); return; }
+
+  const runId = generateRunId();
+  const manifest: MatchRunManifest = {
+    id: runId,
+    status: "queued",
+    created_at: new Date().toISOString(),
+    started_at: null,
+    finished_at: null,
+    job_count: 1,
+    parsed_count: 1,
+    matched_count: 0,
+    failed_count: 0,
+    jobs: [{ provider: job.provider, source_key: job.source_key, job_id: job.job_id,
+      title: job.title, company: companyName(job), location: job.location, job_url: job.job_url }],
+    error: null,
+    result_file: null,
+    log_file: matchRunLogPath(runId),
+  };
+
+  try {
+    await writeManifest(manifest);
+    const inputLine = JSON.stringify({
+      provider: job.provider, source_key: job.source_key, job_id: job.job_id,
+      title: job.title, company: companyName(job), location: job.location,
+      job_url: job.job_url, url: job.job_url,
+      jd_text: jd_text.trim(),
+      parse_error: null,
+    });
+    await ensureMatchRunDir(runId);
+    await writeFile(matchRunInputPath(runId), inputLine + "\n", "utf8");
+    void executeMatchRunFromInput(runId, mode);
+    res.status(202).json({ run_id: runId, status: "queued", job_count: 1 });
+  } catch (error) {
+    console.error("/api/match-runs-with-jd error:", error);
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });

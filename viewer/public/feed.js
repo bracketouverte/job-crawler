@@ -529,7 +529,9 @@
       tag = pipelineTags[0] || null;
     }
 
-    const analysis = tag ? (pipelines[tag]?.analysis || null) : (job.analysis || null);
+    const pipelineEntry = tag ? (pipelines[tag] || null) : null;
+    const jdParseError = pipelineEntry?.jd_parse_error || null;
+    const analysis = pipelineEntry?.analysis || (tag ? null : (job.analysis || null));
     if (!analysis) return;
 
     // Update stored active tag
@@ -637,8 +639,16 @@
         </ul>
       </section>` : '';
 
+    const jdWarningHtml = jdParseError ? `
+      <div class="jd-parse-warning">
+        <span class="jd-parse-warning-icon">⚠</span>
+        <span>Job page could not be fetched — analysis ran on partial data.</span>
+        <button class="btn btn-ghost btn-xs" id="panel-paste-jd">Paste JD</button>
+      </div>` : '';
+
     document.getElementById('panel-body').innerHTML = `
       ${tabsHtml}
+      ${jdWarningHtml}
       <section class="score-block">
         <div class="score-readout">
           <span class="score-num mono">${score.toFixed(1)}</span>
@@ -710,6 +720,11 @@
         closePanel();
         analyzeJob(job, null, m);
       });
+    });
+
+    // Paste JD button
+    document.getElementById('panel-paste-jd')?.addEventListener('click', () => {
+      openPasteJdModal(job, pipeline);
     });
   }
 
@@ -999,6 +1014,65 @@
     const payload = { job_keys: [{ provider: job.provider, source_key: job.source_key, job_id: job.job_id }], ...(mode ? { mode } : {}) };
     try {
       const res  = await fetch('/api/match-runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      activeRuns.set(data.run_id, { job, mode, startedAt: Date.now(), notifId });
+      scheduleRunPoll(data.run_id);
+    } catch (e) {
+      activeAnalysisJobs.delete(activeJobRunKey(job, mode));
+      restoreMainBtn(job, mode);
+      dismissNotif(notifId);
+      pushNotif('error', `Failed · ${job.title ?? 'Job'} · ${comp}`, e.message || 'Analysis failed', false, null);
+    }
+  }
+
+  function openPasteJdModal(job, mode) {
+    const existing = document.getElementById('paste-jd-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'paste-jd-modal';
+    modal.className = 'paste-jd-modal-overlay';
+    modal.innerHTML = `
+      <div class="paste-jd-modal">
+        <div class="paste-jd-modal-header">
+          <span>Paste Job Description</span>
+          <button class="paste-jd-close" id="paste-jd-close">✕</button>
+        </div>
+        <p class="paste-jd-hint">Job page could not be fetched. Paste the full JD text below to run a proper analysis.</p>
+        <textarea id="paste-jd-text" class="paste-jd-textarea" placeholder="Paste the full job description here…" rows="14"></textarea>
+        <div class="paste-jd-modal-footer">
+          <button class="btn btn-ghost" id="paste-jd-cancel">Cancel</button>
+          <button class="btn btn-primary" id="paste-jd-submit">Analyze</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    const close = () => modal.remove();
+    document.getElementById('paste-jd-close').addEventListener('click', close);
+    document.getElementById('paste-jd-cancel').addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+    document.getElementById('paste-jd-submit').addEventListener('click', async () => {
+      const text = document.getElementById('paste-jd-text').value.trim();
+      if (!text) return;
+      close();
+      closePanel();
+      analyzeJobWithJd(job, text, mode);
+    });
+  }
+
+  async function analyzeJobWithJd(job, jdText, mode) {
+    const spinnerLabel = mode === 'claude-ensemble' ? 'Analyzing pipeline…' : 'Analyzing…';
+    setMainBtnSpinner(job, spinnerLabel, mode);
+    const comp = companyName(job);
+    const notifId = pushNotif('neutral', `${job.title ?? 'Job'} · ${comp}`,
+      `${modeLabel(mode)} · Est. ${modeDuration(mode)}`, false, 5000);
+    const payload = { provider: job.provider, source_key: job.source_key, job_id: job.job_id,
+      jd_text: jdText, ...(mode ? { mode } : {}) };
+    try {
+      const res = await fetch('/api/match-runs-with-jd', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
       activeRuns.set(data.run_id, { job, mode, startedAt: Date.now(), notifId });
