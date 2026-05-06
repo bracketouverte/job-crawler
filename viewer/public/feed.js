@@ -1255,7 +1255,16 @@
 
   /* ── Saved searches ──────────────────────────────────────────── */
   let savedSearches = [];
+  let savedSearchesPromise = null;
   const activeSearchIds = new Set();
+
+  function searchId(value) {
+    return String(value ?? '').trim();
+  }
+
+  function activeSavedSearches() {
+    return savedSearches.filter(s => activeSearchIds.has(searchId(s.id)));
+  }
 
   /* ── URL state persistence ───────────────────────────────────── */
   function pushUrlState(page) {
@@ -1270,7 +1279,8 @@
     if (company)                  p.set('company', company);
     if (days)                     p.set('days', days);
     if (sources.length)           p.set('sources', sources.join(','));
-    if (activeSearchIds.size > 0) p.set('searches', [...activeSearchIds].join(','));
+    const activeIds = activeSavedSearches().map(s => searchId(s.id));
+    if (activeIds.length > 0)     p.set('searches', activeIds.join(','));
     if (page && page > 1)         p.set('page', String(page));
     const qs = p.toString();
     history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
@@ -1284,7 +1294,13 @@
     if (p.has('days'))     document.getElementById('filter-days').value     = p.get('days');
     // sources: deferred to loadSources() since checkboxes don't exist yet at boot
     activeSearchIds.clear();
-    if (p.has('searches')) p.get('searches').split(',').filter(Boolean).forEach(id => activeSearchIds.add(Number(id)));
+    if (p.has('searches')) {
+      p.get('searches')
+        .split(',')
+        .map(searchId)
+        .filter(id => id && id.toLowerCase() !== 'nan')
+        .forEach(id => activeSearchIds.add(id));
+    }
     return p.has('page') ? parseInt(p.get('page'), 10) || 1 : 1;
   }
 
@@ -1301,18 +1317,24 @@
       const res = await fetch('/saved-searches.json');
       if (res.ok) savedSearches = await res.json();
     } catch {}
+    const knownIds = new Set(savedSearches.map(s => searchId(s.id)).filter(Boolean));
+    for (const id of [...activeSearchIds]) {
+      if (!knownIds.has(id)) activeSearchIds.delete(id);
+    }
     for (const s of savedSearches) {
+      const id = searchId(s.id);
+      if (!id) continue;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'saved-btn';
-      btn.dataset.searchId = s.id;
+      btn.dataset.searchId = id;
       btn.textContent = s.label;
       btn.addEventListener('click', () => {
-        if (activeSearchIds.has(s.id)) {
-          activeSearchIds.delete(s.id);
+        if (activeSearchIds.has(id)) {
+          activeSearchIds.delete(id);
           btn.classList.remove('active');
         } else {
-          activeSearchIds.add(s.id);
+          activeSearchIds.add(id);
           btn.classList.add('active');
         }
         const multi = activeSearchIds.size > 1;
@@ -1323,7 +1345,7 @@
         }
         if (!multi) {
           // Single search — fill inputs as before
-          const single = savedSearches.find(x => activeSearchIds.has(x.id));
+          const single = savedSearches.find(x => activeSearchIds.has(searchId(x.id)));
           if (single) {
             document.getElementById('filter-title').value    = single.title    ?? '';
             document.getElementById('filter-location').value = single.location ?? '';
@@ -1334,14 +1356,14 @@
         }
         fetchJobs(1);
       });
-      if (activeSearchIds.has(s.id)) btn.classList.add('active');
+      if (activeSearchIds.has(id)) btn.classList.add('active');
       strip.appendChild(btn);
     }
     // Apply lock state from restored URL
     const multi = activeSearchIds.size > 1;
     applySearchLock(multi);
   }
-  loadSavedSearches();
+  savedSearchesPromise = loadSavedSearches();
 
   /* ── Filters ─────────────────────────────────────────────────── */
   function onFilterChange() {
@@ -1424,9 +1446,12 @@
     document.getElementById('pagination').style.display    = 'none';
 
     try {
-      if (activeSearchIds.size > 0) {
+      if (activeSearchIds.size > 0 && savedSearches.length === 0 && savedSearchesPromise) {
+        await savedSearchesPromise;
+      }
+      const active = activeSavedSearches();
+      if (active.length > 0) {
         // Multi-search: fetch each selected search in parallel, dedupe by jobKey
-        const active = savedSearches.filter(s => activeSearchIds.has(s.id));
         const responses = await Promise.all(active.map(s => {
           const p = buildSearchParams({
             title: s.title ?? '', loc: s.location ?? '',
@@ -1659,7 +1684,7 @@
     const urlSources = new URLSearchParams(location.search).get('sources');
     setSelectedProviders(urlSources ? urlSources.split(',').filter(Boolean) : []);
     document.querySelectorAll('.saved-btn').forEach(btn => {
-      const id = Number(btn.dataset.searchId);
+      const id = searchId(btn.dataset.searchId);
       btn.classList.toggle('active', activeSearchIds.has(id));
     });
     applySearchLock(activeSearchIds.size > 1);
