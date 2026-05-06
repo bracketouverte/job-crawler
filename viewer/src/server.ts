@@ -534,10 +534,11 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
   const roleSummary = (analysis as { role_summary?: Record<string, unknown> } | null)?.role_summary ?? {};
   const tldr   = roleSummary.tldr   ? String(roleSummary.tldr)   : null;
   const domain = roleSummary.domain ? String(roleSummary.domain) : null;
+  const validJobUrl = jobUrl.startsWith("http://") || jobUrl.startsWith("https://") ? jobUrl : undefined;
   const embed = {
-    ...(companyUrl ? { author: { name: companyUrl, url: `https://${companyUrl}` } } : {}),
+    ...(companyUrl ? { author: { name: company, url: companyUrl } } : {}),
     title,
-    url: jobUrl || undefined,
+    url: validJobUrl,
     color: 3066993,
     ...(tldr ? { description: tldr } : {}),
     ...(thumbnailUrl ? { thumbnail: { url: thumbnailUrl } } : {}),
@@ -549,6 +550,7 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
       { name: "Compensation", value: jobCompensation(row.compensation as string | null | undefined), inline: true },
       ...(domain ? [{ name: "Domain", value: domain, inline: true }] : []),
       { name: "Decision", value: decisionEmoji(score), inline: false },
+      ...(validJobUrl ? [{ name: "Apply", value: `[Open JD](${validJobUrl})`, inline: false }] : []),
     ],
   };
 
