@@ -550,7 +550,6 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
       { name: "Compensation", value: jobCompensation(row.compensation as string | null | undefined), inline: true },
       ...(domain ? [{ name: "Domain", value: domain, inline: true }] : []),
       { name: "Decision", value: decisionEmoji(score), inline: false },
-      ...(validJobUrl ? [{ name: "Apply", value: `[Open JD](${validJobUrl})`, inline: false }] : []),
     ],
   };
 
