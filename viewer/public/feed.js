@@ -1344,13 +1344,13 @@
           return;
         }
         if (!multi) {
-          // Single search — fill inputs as before
+          // Single search — fill inputs from saved search, but preserve user-typed values
           const single = savedSearches.find(x => activeSearchIds.has(searchId(x.id)));
           if (single) {
-            document.getElementById('filter-title').value    = single.title    ?? '';
-            document.getElementById('filter-location').value = single.location ?? '';
-            document.getElementById('filter-company').value  = single.company  ?? '';
-            document.getElementById('filter-days').value     = single.days     ?? '';
+            if (single.title    != null) document.getElementById('filter-title').value    = single.title;
+            if (single.location != null) document.getElementById('filter-location').value = single.location;
+            if (single.company)          document.getElementById('filter-company').value  = single.company;
+            if (single.days     != null) document.getElementById('filter-days').value     = single.days;
             setSelectedProviders(single.sources || []);
           }
         }
@@ -1450,7 +1450,7 @@
         await savedSearchesPromise;
       }
       const active = activeSavedSearches();
-      if (active.length > 0) {
+      if (active.length > 1) {
         // Multi-search: fetch each selected search in parallel, dedupe by jobKey
         const responses = await Promise.all(active.map(s => {
           const p = buildSearchParams({
