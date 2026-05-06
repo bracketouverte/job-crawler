@@ -440,6 +440,19 @@ body {
 .mode-pill[data-mode="On-site"] .swatch { background: #2563eb; }
 .mode-pill[data-mode="Unknown"] .swatch { background: #9ca3af; }
 
+.salary-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #10b98122;
+  background: #10b98110;
+  color: #065f46;
+  font-weight: 500;
+}
+.job-card.fav .salary-pill { background: rgba(16, 185, 129, 0.15); color: #047857; }
+
 /* JD content blocks */
 .job-content {
   display: grid;

@@ -33,6 +33,7 @@ Complete parameter list:
 --out <file>             JSONL output path (default: /app/output/jobs.jsonl)
 --report <file>          Report JSON path (default: /app/output/report.json)
 --catalog-db <file>      SQLite catalog state file (default: /app/state/catalog.sqlite)
+--catalog-file <file>    Persistent current-jobs catalog JSONL (add/update/remove)
 --exclude-sources <file> JSONL source quarantine file
 --sample <n>             Crawl only first n sources per provider
 --max-jobs-per-source <n> Emit at most n jobs per source
@@ -41,6 +42,9 @@ Complete parameter list:
 --provider-concurrency <spec> Per-provider limits, e.g. ashby=2,workday=10 (default: ashby=2)
 --timeout-ms <n>         Per-request timeout (default: 15000)
 --retries <n>            Transient retry count (default: 2)
+--salary-min <n>         Minimum acceptable salary (block jobs outside range)
+--salary-max <n>         Maximum acceptable salary (block jobs outside range)
+--salary-filter-mode <mode> Filter mode: "mismatch-only" (default, keep jobs with no salary info) or "all" (strict, drop jobs with no salary info)
 ```
 
 Notes:
@@ -48,6 +52,32 @@ Notes:
 - `--max-age-hours` filters on normalized `updated_at`. Jobs with missing or invalid `updated_at` are excluded when this flag is set.
 - `--catalog-db` keeps the persistent SQLite state that powers the current-jobs catalog.
 - `--catalog-file` exports the latest catalog snapshot after the run.
+
+## Salary Range Filtering
+
+The crawler can filter jobs based on salary information to avoid storing postings outside your target compensation band:
+
+```bash
+docker compose run --rm crawler \
+  --salary-min 100000 \
+  --salary-max 200000 \
+  --salary-filter-mode mismatch-only \
+  --catalog-db /app/state/catalog.sqlite
+```
+
+**Options:**
+
+- `--salary-min <n>` — Minimum acceptable salary (optional). Jobs with `salary_max < salary-min` are excluded.
+- `--salary-max <n>` — Maximum acceptable salary (optional). Jobs with `salary_min > salary-max` are excluded.
+- `--salary-filter-mode` — How to handle jobs with missing salary info:
+  - `mismatch-only` (default): Drop only jobs where salary was found **and** falls outside the range. Jobs with no salary info always pass through.
+  - `all`: Strict mode. Drop jobs that either have no salary info OR have salary info that falls outside the range.
+
+**Salary Parsing:**
+
+- Only Greenhouse and Workday populate salary data; jobs from other providers always pass the salary filter (under `mismatch-only` mode).
+- Salary strings are parsed from the compensation field: e.g., `"$80,000 - $120,000"`, `"80k–120k"`, or `"$100,000"`.
+- Parsed values are stored in the `salary_min` and `salary_max` columns of the SQLite catalog for later filtering in the viewer UI.
 
 ## Run Modes
 

@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { CatalogStore } from "./catalog-store.js";
 import { HttpError, createHttpClient } from "./http.js";
+import { parseCompensation } from "./salary.js";
 import { crawlerByProvider } from "./providers/index.js";
 import { isProvider, loadSourceFile, sourceKey } from "./source-loader.js";
 import { CrawlFailure, CrawlReport, NormalizedJob, Provider, ProviderStats, providers, SourceEntry } from "./types.js";
@@ -24,6 +25,9 @@ export type RunOptions = {
   timeoutMs: number;
   retries: number;
   progressFile?: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  salaryFilterMode?: "mismatch-only" | "all";
 };
 
 type WorkItem = {
@@ -104,12 +108,22 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
             maxJobsPerSource: options.maxJobsPerSource
           });
         });
+
+        // Parse compensation and apply salary filter
+        for (const job of jobs) {
+          const { min, max } = parseCompensation(job.compensation);
+          job.salary_min = min;
+          job.salary_max = max;
+        }
+
+        const filteredJobs = salaryFilter(jobs, options.salaryMin, options.salaryMax, options.salaryFilterMode ?? "mismatch-only");
+
         if (catalogStore !== undefined) {
-          catalogStore.recordJobs(jobs, startedAt);
+          catalogStore.recordJobs(filteredJobs, startedAt);
         }
 
         let emitted = 0;
-        for (const job of jobs) {
+        for (const job of filteredJobs) {
           if (minUpdatedAtMs !== undefined && !isFreshEnough(job.posted_at ?? job.updated_at, minUpdatedAtMs)) {
             continue;
           }
@@ -308,6 +322,36 @@ function isFreshEnough(updatedAt: string | null, minUpdatedAtMs: number): boolea
   }
 
   return updatedAtMs >= minUpdatedAtMs;
+}
+
+function salaryFilter(
+  jobs: NormalizedJob[],
+  salaryMin?: number,
+  salaryMax?: number,
+  mode: "mismatch-only" | "all" = "mismatch-only"
+): NormalizedJob[] {
+  // Only filter if at least one salary bound is defined
+  if (salaryMin === undefined && salaryMax === undefined) {
+    return jobs;
+  }
+
+  return jobs.filter((job) => {
+    const hasSalary = job.salary_min !== null || job.salary_max !== null;
+
+    // No salary info: depends on filter mode
+    if (!hasSalary) {
+      return mode === "mismatch-only"; // Keep if mismatch-only, drop if all
+    }
+
+    // Job has salary — check range overlap
+    const jobMin = job.salary_min ?? 0;
+    const jobMax = job.salary_max ?? Number.MAX_SAFE_INTEGER;
+    const userMin = salaryMin ?? 0;
+    const userMax = salaryMax ?? Number.MAX_SAFE_INTEGER;
+
+    // Range overlap: jobMax >= userMin AND jobMin <= userMax
+    return jobMax >= userMin && jobMin <= userMax;
+  });
 }
 
 class Limiter {

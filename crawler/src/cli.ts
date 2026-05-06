@@ -21,6 +21,9 @@ type CliOptions = {
   timeoutMs: number;
   retries: number;
   progressFile: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  salaryFilterMode: "mismatch-only" | "all";
 };
 
 const defaults: CliOptions = {
@@ -35,6 +38,7 @@ const defaults: CliOptions = {
   timeoutMs: 15000,
   retries: 2,
   progressFile: "/app/state/crawler-progress.json",
+  salaryFilterMode: "mismatch-only"
 };
 
 async function main(): Promise<void> {
@@ -58,6 +62,9 @@ async function main(): Promise<void> {
     timeoutMs: options.timeoutMs,
     retries: options.retries,
     progressFile: options.progressFile,
+    salaryMin: options.salaryMin,
+    salaryMax: options.salaryMax,
+    salaryFilterMode: options.salaryFilterMode
   });
 
   await unlink(options.progressFile).catch(() => undefined);
@@ -152,6 +159,24 @@ export function parseArgs(args: string[]): CliOptions {
         options.progressFile = requireValue(arg, next);
         index += 1;
         break;
+      case "--salary-min":
+        options.salaryMin = parsePositiveInteger(arg, requireValue(arg, next));
+        index += 1;
+        break;
+      case "--salary-max":
+        options.salaryMax = parsePositiveInteger(arg, requireValue(arg, next));
+        index += 1;
+        break;
+      case "--salary-filter-mode":
+        {
+          const mode = requireValue(arg, next);
+          if (mode !== "mismatch-only" && mode !== "all") {
+            throw new Error(`${arg} must be "mismatch-only" or "all"`);
+          }
+          options.salaryFilterMode = mode;
+        }
+        index += 1;
+        break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
     }
@@ -202,6 +227,9 @@ Options:
   --provider-concurrency <spec> Per-provider limits, e.g. ashby=2,workday=10 (default: ashby=2)
   --timeout-ms <n>         Per-request timeout (default: 15000)
   --retries <n>            Transient retry count (default: 2)
+  --salary-min <n>         Minimum acceptable salary (block jobs outside range)
+  --salary-max <n>         Maximum acceptable salary (block jobs outside range)
+  --salary-filter-mode <mode> Filter mode: "mismatch-only" (default, keep jobs with no salary info) or "all" (strict, drop jobs with no salary info)
 `);
 }
 

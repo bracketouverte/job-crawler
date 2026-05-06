@@ -17,9 +17,11 @@ https://github.com/santifer/career-ops
 
 - Crawl multiple ATS providers into a normalized job catalog.
 - Persist jobs in SQLite and export the latest snapshot as JSONL.
+- Parse compensation data and extract salary ranges from job postings.
+- Filter jobs by salary range at crawl time (block jobs outside target band) or at query time (UI filtering).
 - Parse a single posting URL into structured fields such as title, location, employment type, workplace type, requirements, and responsibilities.
 - Run both quick-fit and full-fit job scoring with NVIDIA NIM.
-- Browse the local catalog from a local job-feed UI with saved searches, favorites, and fit-analysis workflows.
+- Browse the local catalog from a local job-feed UI with saved searches, favorites, salary filtering, and fit-analysis workflows.
 - Run the whole stack with Docker Compose.
 
 ## Quick Start

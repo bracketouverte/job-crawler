@@ -44,7 +44,7 @@ The viewer expects access to the matcher codebase because it can parse job URLs 
 
 ## API Endpoints
 
-- `GET /api/jobs`
+- `GET /api/jobs` — supports filtering by title, location, company, provider, age, and salary range
 - `GET /api/job`
 - `GET /api/sources`
 - `GET /api/stats`
@@ -68,6 +68,9 @@ Automatically sends Discord embeds when job matches score above the threshold. E
 - saved-search buttons loaded from `public/saved-searches.json`
 - favorite-company filtering stored in local browser storage
 - evaluated-only filtering using the local analysis cache
+- salary range filtering (min/max) with optional "hide jobs without salary" toggle
+- salary badges displayed on job cards (e.g. `$80k–$120k`)
+- salary information shown in job detail panels
 - quick-fit analysis with the Maverick pipeline
 - full-fit analysis with the ensemble pipeline
 - JD data modal backed by the parser API

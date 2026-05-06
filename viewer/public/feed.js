@@ -155,6 +155,23 @@
     return `<span class="ats-pill" style="color:${color};border-color:${color}22;background:${color}0d;" title="${esc(tip)}">${label}</span>`;
   }
 
+  /* ── Salary badge ────────────────────────────────────────────── */
+  function salaryBadgeHtml(job) {
+    if (!job.salary_min && !job.salary_max) return '';
+    const min = job.salary_min ? `$${(job.salary_min / 1000).toFixed(0)}k` : null;
+    const max = job.salary_max ? `$${(job.salary_max / 1000).toFixed(0)}k` : null;
+    let label = '';
+    if (min && max) {
+      label = `${min}–${max}`;
+    } else if (min) {
+      label = `≥${min}`;
+    } else {
+      label = `≤${max}`;
+    }
+    const fullLabel = `${label}/yr`;
+    return `<span class="salary-pill" title="${esc(fullLabel)}">${esc(label)}</span>`;
+  }
+
   /* ── Work mode ───────────────────────────────────────────────── */
   function locationLabel(job, mode) {
     const raw = String(job.location || '').trim();
@@ -359,6 +376,7 @@
               <div class="job-meta-row">
                 ${jdMeta ? `${jdMeta}<span class="dot"></span>` : ''}
                 <span class="ats-pill">${esc(job.provider || '—')}</span>
+                ${salaryBadgeHtml(job) ? '<span class="dot"></span>' + salaryBadgeHtml(job) : ''}
                 <span class="dot"></span>
                 ${ageBadgeHtml(job.posted_at || job.first_seen_at)}
               </div>
@@ -758,7 +776,16 @@
     } else {
       titleEl.textContent = job.title ?? '—';
     }
-    document.getElementById('panel-company').innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;">${pLogoHtml}<span>${esc(pComp)} · ${esc(job.location || '—')}</span></span>`;
+    const salaryText = (() => {
+      if (!job.salary_min && !job.salary_max) return null;
+      const min = job.salary_min ? `$${(job.salary_min / 1000).toFixed(0)}k` : null;
+      const max = job.salary_max ? `$${(job.salary_max / 1000).toFixed(0)}k` : null;
+      if (min && max) return `${min}–${max}`;
+      if (min) return `≥${min}`;
+      return `≤${max}`;
+    })();
+    const salaryDisplay = salaryText ? ` · ${salaryText}/yr` : '';
+    document.getElementById('panel-company').innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;">${pLogoHtml}<span>${esc(pComp)} · ${esc(job.location || '—')}${salaryDisplay}</span></span>`;
 
     // Role meta pills — sourced from the first available analysis's role_summary
     const firstAnalysis = (() => {
@@ -1351,6 +1378,9 @@
             document.getElementById('filter-location').value = single.location ?? '';
             document.getElementById('filter-company').value  = single.company  ?? '';
             document.getElementById('filter-days').value     = single.days     ?? '';
+            document.getElementById('filter-salary-min').value = single.salary_min ?? '';
+            document.getElementById('filter-salary-max').value = single.salary_max ?? '';
+            document.getElementById('hide-no-salary-toggle').checked = single.hide_no_salary ?? false;
             setSelectedProviders(single.sources || []);
           }
         }
@@ -1374,11 +1404,12 @@
       fetchJobs(1, fetchJobsController.signal);
     }, 250);
   }
-  ['filter-title','filter-location','filter-company','filter-days'].forEach(id => {
+  ['filter-title','filter-location','filter-company','filter-days','filter-salary-min','filter-salary-max'].forEach(id => {
     document.getElementById(id).addEventListener('input', onFilterChange);
   });
   document.getElementById('fav-only-toggle').addEventListener('change', renderCurrentView);
   document.getElementById('evaluated-only-toggle').addEventListener('change', renderCurrentView);
+  document.getElementById('hide-no-salary-toggle').addEventListener('change', onFilterChange);
 
   /* ── Render current view ─────────────────────────────────────── */
   function getRenderableJobs() {
@@ -1430,11 +1461,17 @@
     const loc     = overrides.loc     ?? document.getElementById('filter-location').value.trim();
     const company = overrides.company ?? document.getElementById('filter-company').value.trim();
     const days    = overrides.days    ?? document.getElementById('filter-days').value.trim();
+    const salaryMin = overrides.salaryMin ?? document.getElementById('filter-salary-min').value.trim();
+    const salaryMax = overrides.salaryMax ?? document.getElementById('filter-salary-max').value.trim();
+    const hideNoSalary = overrides.hideNoSalary ?? document.getElementById('hide-no-salary-toggle').checked;
     const sources = overrides.sources ?? getSelectedProviders();
     if (title)          p.set('title', title);
     if (loc)            p.set('location', loc);
     if (company)        p.set('company', company);
     if (days)           p.set('days', days);
+    if (salaryMin)      p.set('salary_min', salaryMin);
+    if (salaryMax)      p.set('salary_max', salaryMax);
+    if (hideNoSalary)   p.set('hide_no_salary', '1');
     if (sources.length) p.set('sources', sources.join(','));
     return p;
   }
@@ -1456,6 +1493,8 @@
           const p = buildSearchParams({
             title: s.title ?? '', loc: s.location ?? '',
             company: s.company ?? '', days: s.days ?? '',
+            salaryMin: s.salary_min ?? '', salaryMax: s.salary_max ?? '',
+            hideNoSalary: s.hide_no_salary ?? false,
             sources: s.sources || [],
           });
           p.set('page', '1');

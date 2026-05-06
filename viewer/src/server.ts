@@ -56,6 +56,8 @@ type JobRow = {
   location: string | null;
   employment_type: string | null;
   compensation: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
   department: string | null;
   job_url: string | null;
   updated_at: string | null;
@@ -990,13 +992,33 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(join(__dirname, "../public")));
 
 app.get("/api/jobs", async (req, res) => {
-  const { title, location, days, company, sources, page, limit } = req.query as Record<string, string>;
+  const { title, location, days, company, sources, page, limit, salary_min, salary_max, hide_no_salary } = req.query as Record<string, string>;
 
   const pageNum = Math.max(1, parseInt(page ?? "1", 10));
   const pageSize = Math.min(500, Math.max(1, parseInt(limit ?? "50", 10)));
   const offset = (pageNum - 1) * pageSize;
 
   const { conditions, params } = addJobFilterConditions({ title, location, company, sources, days });
+
+  if (salary_min?.trim()) {
+    const min = parseInt(salary_min, 10);
+    if (!Number.isNaN(min)) {
+      conditions.push("(salary_max IS NOT NULL AND salary_max >= ?)");
+      params.push(min);
+    }
+  }
+
+  if (salary_max?.trim()) {
+    const max = parseInt(salary_max, 10);
+    if (!Number.isNaN(max)) {
+      conditions.push("(salary_min IS NOT NULL AND salary_min <= ?)");
+      params.push(max);
+    }
+  }
+
+  if (hide_no_salary === "1") {
+    conditions.push("(salary_min IS NOT NULL OR salary_max IS NOT NULL)");
+  }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -1009,7 +1031,7 @@ app.get("/api/jobs", async (req, res) => {
     const jobs = db
       .prepare(
         `SELECT provider, source_key, job_id, title, location, employment_type,
-                compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+                compensation, salary_min, salary_max, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
          FROM catalog_jobs ${where}
          ORDER BY COALESCE(posted_at, first_seen_at) DESC
          LIMIT ? OFFSET ?`

@@ -14,6 +14,8 @@ type CatalogRow = {
   location: string | null;
   employment_type: string | null;
   compensation: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
   department: string | null;
   office: string | null;
   language: string | null;
@@ -50,6 +52,8 @@ export class CatalogStore {
         location TEXT,
         employment_type TEXT,
         compensation TEXT,
+        salary_min INTEGER,
+        salary_max INTEGER,
         department TEXT,
         office TEXT,
         language TEXT,
@@ -70,6 +74,18 @@ export class CatalogStore {
     `);
     this.ensureColumn("catalog_jobs", "posted_at", "TEXT");
 
+    // Add salary columns if they don't exist (migration)
+    try {
+      this.db.exec(`ALTER TABLE catalog_jobs ADD COLUMN salary_min INTEGER;`);
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec(`ALTER TABLE catalog_jobs ADD COLUMN salary_max INTEGER;`);
+    } catch {
+      // Column already exists
+    }
+
     this.upsertOne = this.db.prepare(`
       INSERT INTO catalog_jobs (
         provider,
@@ -79,6 +95,8 @@ export class CatalogStore {
         location,
         employment_type,
         compensation,
+        salary_min,
+        salary_max,
         department,
         office,
         language,
@@ -98,6 +116,8 @@ export class CatalogStore {
         @location,
         @employment_type,
         @compensation,
+        @salary_min,
+        @salary_max,
         @department,
         @office,
         @language,
@@ -115,6 +135,8 @@ export class CatalogStore {
         location = excluded.location,
         employment_type = excluded.employment_type,
         compensation = excluded.compensation,
+        salary_min = excluded.salary_min,
+        salary_max = excluded.salary_max,
         department = excluded.department,
         office = excluded.office,
         language = excluded.language,
@@ -136,6 +158,8 @@ export class CatalogStore {
           location: job.location,
           employment_type: job.employment_type,
           compensation: job.compensation,
+          salary_min: job.salary_min,
+          salary_max: job.salary_max,
           department: job.department,
           office: job.office,
           language: job.language,
@@ -160,6 +184,8 @@ export class CatalogStore {
         location,
         employment_type,
         compensation,
+        salary_min,
+        salary_max,
         department,
         office,
         language,

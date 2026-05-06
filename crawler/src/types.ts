@@ -36,6 +36,8 @@ export type NormalizedJob = {
   location: string | null;
   employment_type: string | null;
   compensation: string | null;
+  salary_min?: number | null;
+  salary_max?: number | null;
   department: string | null;
   office: string | null;
   language: string | null;
