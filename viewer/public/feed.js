@@ -204,7 +204,6 @@
   /* ── Footer HTML ─────────────────────────────────────────────── */
   // Pipeline metadata: color, label, CSS class, spark color class
   const PIPELINES = {
-    'claude':          { color: '#0d9488', label: 'Quick',  btnClass: 'btn-analyze--claude',     spark: 'btn-spark--teal',   dur: '~25s',  swatchClass: 'menu-swatch--claude' },
     'claude-ensemble': { color: '#4338ca', label: 'Full',   btnClass: 'btn-analyze--claude-ens', spark: 'btn-spark--indigo', dur: '~2min', swatchClass: 'menu-swatch--claude-ens' },
   };
 
@@ -227,7 +226,6 @@
     };
 
     return `
-      ${btn('claude',          'js-analyze-claude')}
       ${btn('claude-ensemble', 'js-analyze-claude-ens')}
       <button class="btn btn-ghost js-jd-data" title="Extracted JD data">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> JD data
@@ -239,7 +237,6 @@
     footer.querySelectorAll('.js-open-panel-pipeline').forEach(el => {
       el.addEventListener('click', () => openPanel(job, el.dataset.pipeline));
     });
-    footer.querySelector('.js-analyze-claude')?.addEventListener('click',     () => analyzeJob(job, null, 'claude'));
     footer.querySelector('.js-analyze-claude-ens')?.addEventListener('click', () => analyzeJob(job, null, 'claude-ensemble'));
     footer.querySelector('.js-jd-data')?.addEventListener('click',            () => openJdModal(job));
     footer.querySelector('.js-hide')?.addEventListener('click',               () => hideJob(jobKey(job), job));
@@ -785,12 +782,11 @@
 
   /* ── Analyze ─────────────────────────────────────────────────── */
   const MODE_BTN_CLASS = {
-    'claude':          'js-analyze-claude',
     'claude-ensemble': 'js-analyze-claude-ens',
   };
 
   // activeAnalysisJobs is keyed by `jobKey|mode` to support concurrent pipelines per job
-  function activeJobRunKey(job, mode) { return `${jobKey(job)}|${mode ?? 'claude'}`; }
+  function activeJobRunKey(job, mode) { return `${jobKey(job)}|${mode ?? 'claude-ensemble'}`; }
   function jobHasActiveRuns(job) {
     const prefix = jobKey(job) + '|';
     for (const k of activeAnalysisJobs.keys()) { if (k.startsWith(prefix)) return true; }
@@ -798,11 +794,11 @@
   }
 
   function setMainBtnSpinner(job, label, mode, source = 'manual') {
-    activeAnalysisJobs.set(activeJobRunKey(job, mode), { label, mode: mode ?? 'claude', source });
+    activeAnalysisJobs.set(activeJobRunKey(job, mode), { label, mode: mode ?? 'claude-ensemble', source });
     const card = document.querySelector(`.job-card[data-key="${CSS.escape(jobKey(job))}"]`);
     if (!card) return;
     card.querySelectorAll('.btn-analyze').forEach(b => { b.disabled = true; });
-    const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-quick';
+    const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-claude-ens';
     const activeBtn = card.querySelector(`.${jsClass}`);
     if (activeBtn) activeBtn.innerHTML = `<span class="btn-spinner"></span> ${label}`;
   }
@@ -815,7 +811,7 @@
       // Still running other pipelines — just re-enable the button that just finished
       const card = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"]`);
       if (!card) return;
-      const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-quick';
+      const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-claude-ens';
       const btn = card.querySelector(`.${jsClass}`);
       if (btn) { btn.disabled = false; btn.innerHTML = `<span class="btn-spark ${PIPELINES[mode]?.spark || ''}">✦</span> ${PIPELINES[mode]?.label || mode} analyze`; }
       return;
@@ -832,7 +828,7 @@
       const card = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"]`);
       if (!card) continue;
       card.querySelectorAll('.btn-analyze').forEach(b => { b.disabled = true; });
-      const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-quick';
+      const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-claude-ens';
       const activeBtn = card.querySelector(`.${jsClass}`);
       if (activeBtn) activeBtn.innerHTML = `<span class="btn-spinner"></span> ${label}`;
     }
