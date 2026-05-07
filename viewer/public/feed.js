@@ -197,7 +197,7 @@
 
   /* ── Score pill HTML ─────────────────────────────────────────── */
   function scorePillHtml(score, jobKey_) {
-    const tier = score >= 4 ? 'high' : score >= 3 ? 'mid' : 'low';
+    const tier = scoreTier(score);
     return `<span class="score-pill" data-tier="${tier}" data-jkey="${esc(jobKey_)}">${score.toFixed(1)}<span class="max">/5</span></span>`;
   }
 
@@ -607,7 +607,7 @@
             if (!dim) return '';
             const s = Number(dim.score || 0);
             const pctDim = Math.round((s / 5) * 100);
-            const dimTier = s >= 4 ? 'high' : s >= 3 ? 'mid' : 'low';
+            const dimTier = scoreTier(s);
             const reason = dim.reason ? esc(dim.reason) : '';
             return `<div class="sc-row" ${reason ? `title="${reason}"` : ''}>
               <span class="sc-label">${esc(label)}</span>
@@ -685,13 +685,18 @@
 
     document.getElementById('panel-footer').innerHTML = '';
 
-    // Tab switching
-    document.getElementById('panel-body').querySelectorAll('[data-tab-pipeline]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const t = btn.dataset.tabPipeline;
-        renderPanelBody(job, t);
-      });
-    });
+    // Tab switching — use replaceWith to avoid accumulating listeners on re-render
+    if (pipelineTags.length > 1) {
+      const tabsContainer = document.getElementById('panel-body').querySelector('.pipeline-tabs');
+      if (tabsContainer) {
+        const newTabs = tabsContainer.cloneNode(true);
+        newTabs.addEventListener('click', e => {
+          const btn = e.target.closest('[data-tab-pipeline]');
+          if (btn) renderPanelBody(job, btn.dataset.tabPipeline);
+        });
+        tabsContainer.replaceWith(newTabs);
+      }
+    }
 
     // Re-run main button uses same pipeline as the current analysis
     document.getElementById('panel-reanalyze')?.addEventListener('click', () => {
@@ -807,16 +812,16 @@
     const jkey = jobKey(job);
     activeAnalysisJobs.delete(activeJobRunKey(job, mode));
     // Only re-render footer when no more active runs for this job
+    const card = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"]`);
     if (jobHasActiveRuns(job)) {
       // Still running other pipelines — just re-enable the button that just finished
-      const card = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"]`);
       if (!card) return;
       const jsClass = MODE_BTN_CLASS[mode] || 'js-analyze-claude-ens';
       const btn = card.querySelector(`.${jsClass}`);
       if (btn) { btn.disabled = false; btn.innerHTML = `<span class="btn-spark ${PIPELINES[mode]?.spark || ''}">✦</span> ${PIPELINES[mode]?.label || mode} analyze`; }
       return;
     }
-    const footer = document.querySelector(`.job-card[data-key="${CSS.escape(jkey)}"] .job-footer`);
+    const footer = card?.querySelector('.job-footer');
     if (!footer) return;
     footer.innerHTML = footerHtml(job);
     bindFooterEvents(footer, job);
@@ -996,6 +1001,15 @@
     }
   }
 
+  // Shared error handler for analyzeJob / analyzeJobWithJd
+  function _handleAnalyzeError(job, mode, notifId, e) {
+    const comp = companyName(job);
+    activeAnalysisJobs.delete(activeJobRunKey(job, mode));
+    restoreMainBtn(job, mode);
+    dismissNotif(notifId);
+    pushNotif('error', `Failed · ${job.title ?? 'Job'} · ${comp}`, e.message || 'Analysis failed', false, null);
+  }
+
   async function analyzeJob(job, _triggerEl, mode) {
     const spinnerLabel = mode === 'claude-ensemble' ? 'Analyzing pipeline…' : 'Analyzing…';
     setMainBtnSpinner(job, spinnerLabel, mode);
@@ -1015,10 +1029,7 @@
       activeRuns.set(data.run_id, { job, mode, startedAt: Date.now(), notifId });
       scheduleRunPoll(data.run_id);
     } catch (e) {
-      activeAnalysisJobs.delete(activeJobRunKey(job, mode));
-      restoreMainBtn(job, mode);
-      dismissNotif(notifId);
-      pushNotif('error', `Failed · ${job.title ?? 'Job'} · ${comp}`, e.message || 'Analysis failed', false, null);
+      _handleAnalyzeError(job, mode, notifId, e);
     }
   }
 
@@ -1074,10 +1085,7 @@
       activeRuns.set(data.run_id, { job, mode, startedAt: Date.now(), notifId });
       scheduleRunPoll(data.run_id);
     } catch (e) {
-      activeAnalysisJobs.delete(activeJobRunKey(job, mode));
-      restoreMainBtn(job, mode);
-      dismissNotif(notifId);
-      pushNotif('error', `Failed · ${job.title ?? 'Job'} · ${comp}`, e.message || 'Analysis failed', false, null);
+      _handleAnalyzeError(job, mode, notifId, e);
     }
   }
 
@@ -1105,6 +1113,8 @@
         const elapsed = Math.round((Date.now() - startedAt) / 1000);
         const durStr  = elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
         const comp    = companyName(job);
+        // Cache the card lookup once — reused for footer patch and early-exit restores
+        const card = document.querySelector(`.job-card[data-key="${CSS.escape(jobKey(job))}"]`);
 
         if (run.status === 'failed') {
           restoreMainBtn(job, mode);
@@ -1120,8 +1130,6 @@
         const updatedJob = await jobRes.json();
         const idx = allJobs.findIndex(j => jobKey(j) === jobKey(job));
         if (idx !== -1) allJobs[idx] = updatedJob;
-
-        const card = document.querySelector(`.job-card[data-key="${CSS.escape(jobKey(job))}"]`);
         if (card) {
           const score   = Number(updatedJob.analysis?.score_5 || 0);
           const hasAnal = updatedJob.analysis && score > 0;
