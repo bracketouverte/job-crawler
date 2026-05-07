@@ -528,7 +528,11 @@ async function notifyDiscordForScore(row: Record<string, unknown>, runId: string
 
   const title = String(row.title ?? "Job");
   const company = String(row.company ?? row.source_key);
-  const jobUrl = String(row.job_url ?? row.url ?? "");
+  const dbJobUrl = (row.job_url == null && row.url == null)
+    ? (db.prepare("SELECT job_url FROM catalog_jobs WHERE provider=? AND source_key=? AND job_id=?")
+        .get(row.provider, row.source_key, row.job_id) as { job_url: string | null } | undefined)?.job_url ?? ""
+    : "";
+  const jobUrl = String(row.job_url ?? row.url ?? dbJobUrl);
   const thumbnailUrl = companyLogoUrl(company);
   const companyUrl = companyWebsite(company);
   const roleSummary = (analysis as { role_summary?: Record<string, unknown> } | null)?.role_summary ?? {};
