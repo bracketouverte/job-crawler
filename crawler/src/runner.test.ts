@@ -159,6 +159,59 @@ test("runCrawler filters jobs by updated_at age when maxAgeHours is set", async 
   }
 });
 
+test("runCrawler passes SmartRecruiters source templates to provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawler-test-"));
+  const sources = join(dir, "sources");
+  await mkdir(sources);
+  await writeFile(join(sources, "smartrecruiters.json"), JSON.stringify({
+    provider: "smartrecruiters",
+    url_template: "https://example.test/sr/{identifier}/postings",
+    jobid_template: "https://example.test/jobs/{identifier}/{job_id}",
+    companies: [{ identifier: "acme" }]
+  }));
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (!url.includes("https://example.test/sr/acme/postings?")) {
+      throw new Error(`unexpected url: ${url}`);
+    }
+    return new Response(JSON.stringify({
+      content: [
+        { id: "sr-1", name: "Smart Job", location: { city: "Remote" }, releasedDate: "2026-04-15T00:00:00.000Z" }
+      ],
+      offset: 0,
+      limit: 100,
+      totalFound: 1
+    }), { status: 200 });
+  };
+
+  try {
+    const out = join(dir, "out", "jobs.jsonl");
+    const reportPath = join(dir, "out", "report.json");
+    const report = await runCrawler({
+      sourcesDir: sources,
+      selectedProviders: ["smartrecruiters"],
+      concurrency: 1,
+      outFile: out,
+      reportFile: reportPath,
+      progressEveryMs: 0,
+      providerConcurrency: {},
+      timeoutMs: 1000,
+      retries: 0
+    });
+
+    const jsonl = await readFile(out, "utf8");
+    assert.match(jsonl, /Smart Job/);
+    assert.match(jsonl, /https:\/\/example.test\/jobs\/acme\/sr-1/);
+    assert.equal(report.providers.smartrecruiters.succeeded, 1);
+    assert.equal(report.total_jobs, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("runCrawler syncs a persistent catalog across runs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "crawler-test-"));
   const sources = join(dir, "sources");

@@ -49,6 +49,11 @@ export async function loadSourceFile(sourcesDir: string, provider: Provider): Pr
   if (!Array.isArray(parsed.companies)) {
     throw new Error(`${file} must contain a companies array`);
   }
+  for (const key of ["url_template", "jobid_template"]) {
+    if (parsed[key as keyof SourceFile] !== undefined && typeof parsed[key as keyof SourceFile] !== "string") {
+      throw new Error(`${file}.${key} must be a string when present`);
+    }
+  }
 
   for (const [index, source] of parsed.companies.entries()) {
     validateSource(provider, source, `${file} companies[${index}]`);

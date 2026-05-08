@@ -4,6 +4,7 @@ import { normalizeAshbyJob } from "./ashby.js";
 import { normalizeBambooJob } from "./bamboohr.js";
 import { normalizeGreenhouseJob } from "./greenhouse.js";
 import { normalizeLeverJob } from "./lever.js";
+import { normalizeSmartRecruitersJob } from "./smartrecruiters.js";
 import { normalizeTeamtailorJob } from "./teamtailor.js";
 import { normalizeWorkableJob } from "./workable.js";
 import { normalizeWorkdayJob, parseWorkdayPostedAt } from "./workday.js";
@@ -71,6 +72,28 @@ test("normalizes Lever jobs", () => {
   assert.equal(job.title, "Account Executive");
   assert.equal(job.employment_type, "Full-time");
   assert.equal(job.department, "Sales");
+});
+
+test("normalizes SmartRecruiters jobs", () => {
+  const job = normalizeSmartRecruitersJob("smartco", {
+    id: "744000000000000",
+    name: "Senior Engineer",
+    location: { city: "New York", region: "NY", country: "United States", remote: true },
+    typeOfEmployment: { label: "Full-time" },
+    department: { label: "Engineering" },
+    releasedDate: "2026-04-14T12:00:00.000Z",
+    updatedDate: "2026-04-15T12:00:00.000Z"
+  }, fetchedAt);
+
+  assert.equal(job.provider, "smartrecruiters");
+  assert.equal(job.job_id, "744000000000000");
+  assert.equal(job.title, "Senior Engineer");
+  assert.equal(job.location, "New York, NY, United States");
+  assert.equal(job.employment_type, "Full-time");
+  assert.equal(job.department, "Engineering");
+  assert.equal(job.office, "Remote");
+  assert.equal(job.updated_at, "2026-04-15T12:00:00.000Z");
+  assert.equal(job.job_url, "https://jobs.smartrecruiters.com/smartco/744000000000000");
 });
 
 test("normalizes Teamtailor RSS items", () => {
