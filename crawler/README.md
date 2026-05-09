@@ -9,7 +9,7 @@ Run with catalog persistence (SQLite + JSONL output):
 ```bash
 docker compose run --rm crawler \
   --concurrency 8 \
-  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2 \
+  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2,smartrecruiters=2 \
   --timeout-ms 30000 \
   --retries 5 \
   --exclude-sources /app/state/exclude.jsonl \
@@ -60,7 +60,7 @@ Best for stability. Use when hitting rate limits or 403/429 errors.
 ```bash
 docker compose run --rm crawler \
   --concurrency 8 \
-  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2 \
+  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2,smartrecruiters=2 \
   --timeout-ms 30000 \
   --retries 5 \
   --exclude-sources /app/state/exclude.jsonl \

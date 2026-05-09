@@ -6,7 +6,7 @@
 
 It has three main modules:
 
-- `crawler/` collects public job postings from providers like Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, and Workable.
+- `crawler/` collects public job postings from providers like Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, Workable, and SmartRecruiters.
 - `matcher/` extracts structured job-post data from a posting URL and runs fit analysis against a profile.
 - `viewer/` serves a local job-feed UI over the crawler catalog, with favorites, saved searches, JD inspection, and matcher-backed fit analysis.
 
@@ -39,7 +39,7 @@ Run with catalog persistence (SQLite + JSONL output):
 ```bash
 docker compose run --rm crawler \
   --concurrency 8 \
-  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2 \
+  --provider-concurrency ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2,smartrecruiters=2 \
   --timeout-ms 30000 \
   --retries 5 \
   --exclude-sources /app/state/exclude.jsonl \
@@ -129,7 +129,7 @@ The `scheduler` service runs the crawler on a daytime schedule and avoids rerunn
 - SQLite for the local job catalog
 - Docker Compose for local orchestration
 - NVIDIA NIM for fit-analysis inference
-- Public ATS APIs and page metadata from Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, and Workable
+- Public ATS APIs and page metadata from Greenhouse, Lever, Ashby, BambooHR, Teamtailor, Workday, Workable, and SmartRecruiters
 
 ## Module Docs
 

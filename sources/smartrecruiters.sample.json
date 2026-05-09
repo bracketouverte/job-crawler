@@ -1,6 +1,7 @@
 {
-  "provider": "SmartRecruiters",
+  "provider": "smartrecruiters",
   "url_template": "https://api.smartrecruiters.com/v1/companies/{identifier}/postings/",
+  "jobid_template": "https://jobs.smartrecruiters.com/{identifier}/{job_id}",
   "companies": [
     {
       "identifier": "example-company"

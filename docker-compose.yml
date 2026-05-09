@@ -96,7 +96,7 @@ services:
       - --concurrency
       - "8"
       - --provider-concurrency
-      - ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2
+      - ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2,smartrecruiters=2
       - --timeout-ms
       - "30000"
       - --retries

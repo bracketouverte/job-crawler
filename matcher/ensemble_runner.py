@@ -52,9 +52,9 @@ CHAT_COMPLETIONS_URL = chat_completions_url()
 DEFAULT_SCORERS = [
     "meta/llama-4-maverick-17b-128e-instruct",
     "moonshotai/kimi-k2-instruct",
-    "deepseek-ai/deepseek-v4-flash",
+    "nvidia/llama-3.3-nemotron-super-49b-v1.5",
 ]
-DEFAULT_SYNTHESIZER = "deepseek-ai/deepseek-v4-flash"
+DEFAULT_SYNTHESIZER = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
 
 
 def csv_env(name, default):
@@ -189,14 +189,17 @@ def call_model(model, system, user_content, max_tokens=2000, temperature=0.2, re
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    if model.startswith("deepseek-ai/deepseek-v4"):
-        payload["reasoning_effort"] = os.environ.get("NVIDIA_DEEPSEEK_REASONING_EFFORT", "none")
+    # nemotron-super returns content=null unless thinking mode is explicitly on
+    if "nemotron-super" in model:
+        payload["nvext"] = {"thinking": "on"}
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     for attempt in range(1, retries + 1):
         try:
             r = requests.post(CHAT_COMPLETIONS_URL, headers=headers, json=payload, timeout=180)
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            msg = r.json()["choices"][0]["message"]
+            # nemotron-super with thinking=on puts output in content; fallback to reasoning_content
+            return msg.get("content") or msg.get("reasoning_content", "") or ""
         except Exception as e:
             if attempt == retries:
                 raise

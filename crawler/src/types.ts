@@ -3,6 +3,7 @@ export const providers = [
   "bamboohr",
   "greenhouse",
   "lever",
+  "smartrecruiters",
   "teamtailor",
   "workable",
   "workday",
@@ -25,6 +26,7 @@ export type SourceEntry = IdentifierSource | WorkdaySource;
 export type SourceFile = {
   provider: Provider;
   url_template?: string;
+  jobid_template?: string;
   companies: SourceEntry[];
 };
 
@@ -89,6 +91,8 @@ export type CrawlContext = {
   http: HttpClient;
   fetchedAt: () => string;
   maxJobsPerSource?: number;
+  urlTemplate?: string;
+  jobIdTemplate?: string;
 };
 
 export type ProviderCrawler = {

@@ -29,6 +29,8 @@ export type RunOptions = {
 type WorkItem = {
   provider: Provider;
   source: SourceEntry;
+  urlTemplate?: string;
+  jobIdTemplate?: string;
 };
 
 export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
@@ -49,7 +51,12 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
         stats[provider].skipped += 1;
         continue;
       }
-      providerItems.push({ provider, source });
+      providerItems.push({
+        provider,
+        source,
+        urlTemplate: sourceFile.url_template,
+        jobIdTemplate: sourceFile.jobid_template
+      });
     }
     itemsByProvider.set(provider, providerItems);
   }
@@ -101,7 +108,9 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
           return crawler.crawl(item.source, {
             http,
             fetchedAt: () => fetchedAt,
-            maxJobsPerSource: options.maxJobsPerSource
+            maxJobsPerSource: options.maxJobsPerSource,
+            urlTemplate: item.urlTemplate,
+            jobIdTemplate: item.jobIdTemplate
           });
         });
         if (catalogStore !== undefined) {
