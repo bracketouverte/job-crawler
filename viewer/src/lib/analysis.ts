@@ -45,7 +45,7 @@ let _analysisCacheTime = 0;
 export const ANALYSIS_CACHE_TTL_MS = 5000;
 
 export async function writeAnalysisCache(cache: AnalysisCache): Promise<void> {
-  await writeFile(ANALYSIS_CACHE_PATH, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+  await writeFile(ANALYSIS_CACHE_PATH, `${JSON.stringify(cache)}\n`, "utf8");
   _analysisCacheValue = cache;
   _analysisCacheTime = Date.now();
 }
