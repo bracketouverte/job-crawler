@@ -1544,6 +1544,25 @@ body {
   padding: 0 4px;
 }
 .queue-btn-badge:empty { display: none; }
+.queue-btn-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.queue-processed-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.qps-icon {
+  color: var(--accent);
+  font-weight: 700;
+}
+.qps-sep { color: var(--line); }
+.qps-apply-icon { font-size: 11px; }
 
 /* ── Queue drawer ───────────────────────────────────────────────── */
 .queue-overlay {
@@ -1593,18 +1612,16 @@ body {
 .queue-drawer-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  padding: 12px 0 16px;
 }
-.queue-empty-msg { color: var(--muted); font-size: 13px; text-align: center; margin-top: 40px; }
+.queue-empty-msg { color: var(--muted); font-size: 13px; text-align: center; margin: 40px 12px 0; }
 
 /* ── Queue item card ────────────────────────────────────────────── */
 .qi-card {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 14px 16px;
+  margin: 0 12px 12px;
   background: var(--card-bg, var(--bg));
 }
 .qi-card.qi-done { opacity: 0.55; }
@@ -1708,3 +1725,115 @@ body {
 .qi-aa-running:hover { background: #f0fdf4; }
 .qi-aa-paused  { border-color: #d97706; color: #d97706; }
 .qi-aa-paused:hover  { background: #fffbeb; }
+
+/* ── Apply bucket ───────────────────────────────────────────────── */
+.apply-bucket {
+  margin: 0 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--hover);
+}
+.apply-bucket-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+.apply-bucket-chevron {
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.apply-bucket-chevron.open { transform: rotate(90deg); }
+.apply-bucket-list.collapsed { display: none; }
+.apply-bucket-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+}
+.apply-bucket-list { padding: 0 0 4px; }
+.apply-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.apply-item:hover { background: var(--bg); }
+.apply-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.apply-item-title {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.apply-item-company {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.apply-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.apply-item-dismiss {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+}
+.apply-item:hover .apply-item-dismiss { opacity: 1; }
+.apply-item-dismiss:hover { background: var(--hover); color: var(--ink); }
+.queue-section-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 12px 0;
+}
+.queue-help-tip {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  padding: 12px 16px;
+  margin: 0;
+}
+
+/* Flash highlight when jumping to a job from the apply bucket */
+@keyframes apply-flash {
+  0%   { outline: 2px solid #16a34a; outline-offset: 2px; }
+  70%  { outline: 2px solid #16a34a; outline-offset: 2px; }
+  100% { outline: none; }
+}
+.apply-highlight { animation: apply-flash 1.5s ease-out forwards; }

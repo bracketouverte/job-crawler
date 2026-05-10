@@ -19,10 +19,19 @@
       <div class="sub" id="header-sub">Loading…</div>
     </div>
     <div class="meta" id="header-meta"></div>
-    <button class="queue-btn" id="queue-btn" aria-label="Queue" title="Analysis queue">
-      <span class="queue-btn-label">Queue</span>
-      <span class="queue-btn-badge" id="queue-badge"></span>
-    </button>
+    <div class="queue-btn-wrap">
+      <button class="queue-btn" id="queue-btn" aria-label="Queue" title="Analysis queue">
+        <span class="queue-btn-label">Queue</span>
+        <span class="queue-btn-badge" id="queue-badge"></span>
+      </button>
+      <span class="queue-processed-stat" id="queue-processed-stat" style="display:none">
+        <span class="qps-icon">✓</span>
+        <span id="queue-processed-count">0</span> processed
+        <span class="qps-sep">·</span>
+        <span class="qps-apply-icon">📋</span>
+        <span id="queue-apply-count">0</span> to apply
+      </span>
+    </div>
   </header>
 
   <!-- Queue drawer -->

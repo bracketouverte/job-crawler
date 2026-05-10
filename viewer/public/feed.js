@@ -8,6 +8,7 @@
   let pageSize = 50;
   let debounceTimer = null;
   let fetchJobsController = null;
+  let pendingScrollKey = null;
   let logoDevPublishableKey = null;
   let hasLogoDevBrandSearch = false;
   let matcherEnabled = false;
@@ -947,6 +948,13 @@
     const data = await res.json();
 
     if (!data.active) {
+      if (crawlWasActive) {
+        // Crawl just finished — reset the processed counter
+        const doneCount = lastQueueItems.filter(i => i.status === 'done' || i.status === 'permanent_error').length;
+        processedCountOffset = doneCount;
+        renderQueueItems(lastQueueItems);
+        crawlWasActive = false;
+      }
       indicator.classList.remove('active');
       if (data.total_jobs) {
         fill.style.width = '100%';
@@ -958,6 +966,7 @@
       return;
     }
 
+    crawlWasActive = true;
     indicator.classList.add('active');
     delete indicator.dataset.nextRun;
 
@@ -1406,6 +1415,19 @@
     empty.style.display = 'none';
     renderJobs(jobs);
     list.style.display = 'flex';
+
+    if (pendingScrollKey) {
+      const key = pendingScrollKey;
+      pendingScrollKey = null;
+      requestAnimationFrame(() => {
+        const card = document.querySelector(`.job-card[data-key="${CSS.escape(key)}"]`);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          card.classList.add('apply-highlight');
+          setTimeout(() => card.classList.remove('apply-highlight'), 1500);
+        }
+      });
+    }
   }
 
   /* ── Fetch jobs ──────────────────────────────────────────────── */
@@ -1527,6 +1549,7 @@
       hasLogoDevBrandSearch = Boolean(data.hasLogoDevBrandSearch);
       matcherEnabled        = Boolean(data.matcherEnabled);
       if (data.ensemble) ensembleConfig = data.ensemble;
+      if (typeof data.scoreNotifyMinScore === 'number') scoreNotifyMinScore = data.scoreNotifyMinScore;
       renderCurrentView();
     } catch {}
   }
@@ -1682,6 +1705,11 @@
   let queueTickTimer = null;
   let lastQueueItems = [];
   let ensembleConfig = { scorers: [], synthesizer: '' }; // filled by fetchConfig
+  let scoreNotifyMinScore = 4; // filled by fetchConfig
+  const dismissedApplyKeys = new Set();
+  let processedCountOffset = 0; // resets to current done+error count after each crawl
+  let crawlWasActive = false;
+  let applyBucketCollapsed = false;
 
   const queueBtn    = document.getElementById('queue-btn');
   const queueBadge  = document.getElementById('queue-badge');
@@ -1694,6 +1722,7 @@
     queueDrawerOpen = true;
     queueDrawer.classList.add('open');
     queueOverlay.classList.add('open');
+    renderQueueItems(lastQueueItems); // paint immediately from cached data
     startQueuePoll();
   }
 
@@ -1751,9 +1780,46 @@
     queueBadge.textContent = String(badge);
     queueBtn.style.display = 'inline-flex';
 
+    // Update processed stat + to-apply count beside queue button
+    const totalProcessed = items.filter(i => i.status === 'done' || i.status === 'permanent_error').length;
+    const displayedProcessed = Math.max(0, totalProcessed - processedCountOffset);
+    const applyItems = items.filter(i => i.status === 'done' && i.score != null && i.score >= scoreNotifyMinScore && !dismissedApplyKeys.has(i.job_key))
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const procStat    = document.getElementById('queue-processed-stat');
+    const procCount   = document.getElementById('queue-processed-count');
+    const applyCount  = document.getElementById('queue-apply-count');
+    if (procStat && procCount) {
+      procCount.textContent = String(displayedProcessed);
+      if (applyCount) applyCount.textContent = String(applyItems.length);
+      procStat.style.display = displayedProcessed > 0 ? 'inline-flex' : 'none';
+    }
+
     if (!queueDrawerOpen) return;
+
+    const applyBucketHtml = applyItems.length > 0 ? `
+      <div class="apply-bucket">
+        <div class="apply-bucket-header" data-action="toggle-apply-bucket">
+          <span class="apply-bucket-chevron${applyBucketCollapsed ? '' : ' open'}">▸</span>
+          To Apply <span class="apply-bucket-badge">${applyItems.length}</span>
+        </div>
+        <div class="apply-bucket-list${applyBucketCollapsed ? ' collapsed' : ''}">
+          ${applyItems.map(item => `
+            <div class="apply-item" data-apply-key="${esc(item.job_key)}" title="Open job details">
+              <div class="apply-item-meta">
+                <span class="apply-item-title">${esc(item.title)}</span>
+                <span class="apply-item-company">${esc(item.company)}</span>
+              </div>
+              <div class="apply-item-right">
+                <span class="qi-score-badge">${item.score.toFixed(1)} / 5</span>
+                <button class="apply-item-dismiss" data-dismiss-key="${esc(item.job_key)}" title="Remove from list">✕</button>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+      <div class="queue-section-divider"></div>` : '';
+
     if (items.length === 0) {
-      queueBody.innerHTML = '<p class="queue-empty-msg">No items in queue.</p>';
+      queueBody.innerHTML = applyBucketHtml + '<p class="queue-empty-msg">No items in queue.</p>' + '<p class="queue-help-tip">Jobs matching your saved searches are analyzed automatically.</p>';
       return;
     }
 
@@ -1761,7 +1827,7 @@
     const ORDER = { running: 0, retrying: 1, error: 2, todo: 3, permanent_error: 4, done: 5 };
     const sorted = [...items].sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9));
 
-    queueBody.innerHTML = sorted.map(item => {
+    queueBody.innerHTML = applyBucketHtml + sorted.map(item => {
       const isDone = item.status === 'done';
       const isErr = item.status === 'permanent_error' || item.status === 'error';
       const pillClass = STATUS_PILL_CLASS[item.status] ?? 'qi-pill-todo';
@@ -1811,7 +1877,7 @@
           <div class="qi-subtasks">${subtasksHtml}</div>
           ${retryInfo}${errHtml}${actions}
         </div>`;
-    }).join('');
+    }).join('') + '<p class="queue-help-tip">Jobs matching your saved searches are analyzed automatically.</p>';
 
     // Wire action buttons
     queueBody.querySelectorAll('[data-action]').forEach(btn => {
@@ -1831,6 +1897,48 @@
         } catch (e) {
           btn.disabled = false;
         }
+      });
+    });
+
+    // Wire apply-bucket toggle
+    const applyHeader = queueBody.querySelector('[data-action="toggle-apply-bucket"]');
+    if (applyHeader) {
+      applyHeader.addEventListener('click', () => {
+        applyBucketCollapsed = !applyBucketCollapsed;
+        const list = queueBody.querySelector('.apply-bucket-list');
+        const chevron = queueBody.querySelector('.apply-bucket-chevron');
+        if (list) list.classList.toggle('collapsed', applyBucketCollapsed);
+        if (chevron) chevron.classList.toggle('open', !applyBucketCollapsed);
+      });
+    }
+
+    // Wire apply-item dismiss buttons
+    queueBody.querySelectorAll('.apply-item-dismiss[data-dismiss-key]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dismissedApplyKeys.add(btn.dataset.dismissKey);
+        renderQueueItems(lastQueueItems);
+      });
+    });
+
+    // Wire apply-item click: open job detail panel (fetch job directly if not in current page)
+    queueBody.querySelectorAll('.apply-item[data-apply-key]').forEach(row => {
+      row.addEventListener('click', async () => {
+        const key = row.dataset.applyKey;
+        closeQueueDrawer();
+
+        // Try the in-memory list first
+        const inMemory = allJobs.find(j => jobKey(j) === key);
+        if (inMemory) { openPanel(inMemory, null); return; }
+
+        // Not in current page — fetch directly from the single-job API
+        const [provider, source_key, job_id] = key.split('|');
+        try {
+          const res = await fetch(`/api/job?${new URLSearchParams({ provider, source_key, job_id })}`);
+          if (!res.ok) return;
+          const job = await res.json();
+          openPanel(job, null);
+        } catch (_) {}
       });
     });
   }

@@ -15,6 +15,7 @@ import {
   LOGO_DEV_PUBLISHABLE_KEY,
   CRAWLER_PROGRESS_PATH,
   MATCH_RUNS_DIR,
+  SCORE_NOTIFY_MIN_SCORE,
   activeRunIds,
   logoDevBrandCache,
   savedSearchAnalyzerBusy,
@@ -198,6 +199,7 @@ app.get("/api/config", (_req, res) => {
     hasLogoDevBrandSearch: Boolean(LOGO_DEV_SECRET_KEY),
     matcherEnabled: true,
     ensemble: { scorers, synthesizer },
+    scoreNotifyMinScore: SCORE_NOTIFY_MIN_SCORE,
   });
 });
 
