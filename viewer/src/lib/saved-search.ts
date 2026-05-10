@@ -22,6 +22,7 @@ import {
   matchRunLogPath,
   executeMatchRun,
 } from "./match-run.js";
+import { readQueue } from "./queue.js";
 
 export async function readSavedSearches(): Promise<SavedSearch[]> {
   try {
@@ -52,6 +53,13 @@ export async function findNextSavedSearchJob(): Promise<{ job: JobRow; search: S
   const analysisCache = await getAnalysisCache();
   const hiddenJobs = await readHiddenJobs();
 
+  const queueItems = await readQueue();
+  const activeQueueKeys = new Set(
+    queueItems
+      .filter((i) => i.status === "running" || i.status === "todo" || i.status === "retrying")
+      .map((i) => i.job_key),
+  );
+
   for (const search of searches) {
     const { conditions, params } = addJobFilterConditions({
       title: search.title,
@@ -79,7 +87,7 @@ export async function findNextSavedSearchJob(): Promise<{ job: JobRow; search: S
 
       for (const job of jobs) {
         const key = jobCacheKey(job);
-        if (hiddenJobs.has(key) || hasFullAnalysis(analysisCache[key])) {
+        if (hiddenJobs.has(key) || hasFullAnalysis(analysisCache[key]) || activeQueueKeys.has(key)) {
           continue;
         }
         return { job, search };

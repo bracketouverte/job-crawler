@@ -199,7 +199,10 @@ def call_model(model, system, user_content, max_tokens=2000, temperature=0.2, re
             r.raise_for_status()
             msg = r.json()["choices"][0]["message"]
             # nemotron-super with thinking=on puts output in content; fallback to reasoning_content
-            return msg.get("content") or msg.get("reasoning_content", "") or ""
+            content = msg.get("content") or msg.get("reasoning_content", "") or ""
+            if not content.strip():
+                raise ValueError("empty response content from model")
+            return content
         except Exception as e:
             if attempt == retries:
                 raise
@@ -358,7 +361,13 @@ def apply_match_guardrails(analysis, match_context):
     return analysis
 
 
-def ensemble_analyze(jd_text, profile_text, job_label, profile_data=None):
+def _scorer_cache_path(cache_dir, job_id, model):
+    safe_model = re.sub(r"[^a-zA-Z0-9_\-]", "_", model)
+    safe_job = re.sub(r"[^a-zA-Z0-9_\-]", "_", str(job_id))
+    return Path(cache_dir) / f"{safe_job}__{safe_model}.json"
+
+
+def ensemble_analyze(jd_text, profile_text, job_label, profile_data=None, cache_dir=None, job_id=None):
     if profile_data:
         match_context = build_match_context_from_profile_data(jd_text, profile_data)
     else:
@@ -371,41 +380,83 @@ def ensemble_analyze(jd_text, profile_text, job_label, profile_data=None):
         f"Analyze this job posting:\n\n{jd_text}"
     )
 
-    # Phase 1: parallel scoring
+    # Phase 1: parallel scoring — skip models with a cached result from a previous attempt
+    if cache_dir:
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
+    def run_scorer(model):
+        if cache_dir and job_id:
+            cp = _scorer_cache_path(cache_dir, job_id, model)
+            if cp.exists():
+                try:
+                    cached = json.loads(cp.read_text(encoding="utf-8"))
+                    sc = cached.get("scorecard", {})
+                    avg = round(sum(v.get("score", 0) for v in sc.values()) / max(len(sc), 1), 2)
+                    log(f"[ensemble] {job_label} | scorer {model.split('/')[-1]} | avg={avg} (cached)")
+                    return model, cached
+                except Exception:
+                    pass  # corrupt cache — re-run
+        raw = call_model(model, system_with_profile, user_msg)
+        parsed = strip_json(raw)
+        if cache_dir and job_id:
+            cp = _scorer_cache_path(cache_dir, job_id, model)
+            cp.write_text(json.dumps(parsed, ensure_ascii=False), encoding="utf-8")
+        sc = parsed.get("scorecard", {})
+        avg = round(sum(v.get("score", 0) for v in sc.values()) / max(len(sc), 1), 2)
+        log(f"[ensemble] {job_label} | scorer {model.split('/')[-1]} | avg={avg}")
+        return model, parsed
+
     scorer_results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(SCORERS)) as pool:
-        futures = {pool.submit(call_model, m, system_with_profile, user_msg): m for m in SCORERS}
+        futures = {pool.submit(run_scorer, m): m for m in SCORERS}
         for f in concurrent.futures.as_completed(futures):
             model = futures[f]
             try:
-                parsed = strip_json(f.result())
+                _, parsed = f.result()
                 scorer_results.append({"model": model, "result": parsed})
-                sc = parsed.get("scorecard", {})
-                avg = round(sum(v.get("score", 0) for v in sc.values()) / max(len(sc), 1), 2)
-                log(f"[ensemble] {job_label} | scorer {model.split('/')[-1]} | avg={avg}")
             except Exception as e:
                 log(f"[ensemble] {job_label} | scorer {model.split('/')[-1]} | error: {e}")
 
     if not scorer_results:
         raise RuntimeError("All scorers failed")
 
-    # Phase 2: synthesis
-    analyses_text = ""
-    for i, r in enumerate(scorer_results, 1):
-        analyses_text += f"\n\n--- Analysis {i} ({r['model'].split('/')[-1]}) ---\n"
-        analyses_text += json.dumps(r["result"], ensure_ascii=False, indent=2)
+    # Phase 2: synthesis — also cacheable
+    synth_cache_path = (_scorer_cache_path(cache_dir, job_id, f"{SYNTHESIZER}__synthesis") if cache_dir and job_id else None)
+    synthesis = None
+    if synth_cache_path and synth_cache_path.exists():
+        try:
+            synthesis = json.loads(synth_cache_path.read_text(encoding="utf-8"))
+            log(f"[ensemble] {job_label} | synthesis (cached)")
+        except Exception:
+            synthesis = None
 
-    synth_user = (
-        "Structured candidate/JD match context:\n\n"
-        f"{format_match_context(match_context)}\n\n"
-        f"Job posting:\n\n{jd_text}\n\nIndependent analyses to synthesize:{analyses_text}"
-    )
-    synth_system = SYNTHESIS_SYSTEM + "\n\nCandidate profile:\n" + profile_text
+    if synthesis is None:
+        analyses_text = ""
+        for i, r in enumerate(scorer_results, 1):
+            analyses_text += f"\n\n--- Analysis {i} ({r['model'].split('/')[-1]}) ---\n"
+            analyses_text += json.dumps(r["result"], ensure_ascii=False, indent=2)
 
-    log(f"[ensemble] {job_label} | synthesizing with {SYNTHESIZER.split('/')[-1]}…")
-    synth_raw = call_model(SYNTHESIZER, synth_system, synth_user, max_tokens=2000, temperature=0.1)
-    synthesis = strip_json(synth_raw)
-    log(f"[ensemble] {job_label} | synthesis done")
+        synth_user = (
+            "Structured candidate/JD match context:\n\n"
+            f"{format_match_context(match_context)}\n\n"
+            f"Job posting:\n\n{jd_text}\n\nIndependent analyses to synthesize:{analyses_text}"
+        )
+        synth_system = SYNTHESIS_SYSTEM + "\n\nCandidate profile:\n" + profile_text
+
+        log(f"[ensemble] {job_label} | synthesizing with {SYNTHESIZER.split('/')[-1]}…")
+        synth_retries = 3
+        for synth_attempt in range(1, synth_retries + 1):
+            synth_raw = call_model(SYNTHESIZER, synth_system, synth_user, max_tokens=2000, temperature=0.1)
+            try:
+                synthesis = strip_json(synth_raw)
+                if synth_cache_path:
+                    synth_cache_path.write_text(json.dumps(synthesis, ensure_ascii=False), encoding="utf-8")
+                break
+            except Exception as e:
+                if synth_attempt == synth_retries:
+                    raise
+                log(f"[ensemble] {job_label} | synthesis JSON parse error (attempt {synth_attempt}/{synth_retries}): {e} | retrying…")
+        log(f"[ensemble] {job_label} | synthesis done")
 
     return synthesis, match_context
 
@@ -413,6 +464,9 @@ def ensemble_analyze(jd_text, profile_text, job_label, profile_data=None):
 def process_batch(input_file, output_file, profile_text, profile_data=None, pipeline_tag="ensemble"):
     results = []
     total = succeeded = failed = 0
+
+    # Cache dir lives next to the input file; survives retries, cleaned up on job success
+    cache_dir = Path(input_file).parent / ".scorer_cache"
 
     with open(input_file, encoding="utf-8") as f:
         lines = [l.strip() for l in f if l.strip()]
@@ -445,7 +499,10 @@ def process_batch(input_file, output_file, profile_text, profile_data=None, pipe
             log(f"[ensemble-batch] {job_label} | start | jd_chars={len(jd_text)}")
             t0 = time.time()
             try:
-                synthesis, match_context = ensemble_analyze(jd_text, profile_text, job_label, profile_data=profile_data)
+                synthesis, match_context = ensemble_analyze(
+                    jd_text, profile_text, job_label, profile_data=profile_data,
+                    cache_dir=cache_dir, job_id=job_id,
+                )
                 scorecard = synthesis.get("scorecard", {})
                 score_100 = score_to_100(scorecard)
                 score_5 = round(1.0 + (4.0 * score_100 / 100.0), 1)
@@ -487,6 +544,12 @@ def process_batch(input_file, output_file, profile_text, profile_data=None, pipe
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
                 succeeded += 1
                 log(f"[ensemble-batch] {job_label} | done | score={score_100} verdict={verdict} elapsed={row['elapsed']}s")
+                # Clean up scorer cache for this job now that it succeeded
+                for m in SCORERS:
+                    try: _scorer_cache_path(cache_dir, job_id, m).unlink(missing_ok=True)
+                    except Exception: pass
+                try: _scorer_cache_path(cache_dir, job_id, f"{SYNTHESIZER}__synthesis").unlink(missing_ok=True)
+                except Exception: pass
             except Exception as e:
                 log(f"[ensemble-batch] {job_label} | error: {e}")
                 row = {

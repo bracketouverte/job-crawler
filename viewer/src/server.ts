@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
 import type { JobRow, MatchJobKey, StatsRow } from "./lib/types.js";
+import { readQueue, upsertQueueItem, removeQueueItem } from "./lib/queue.js";
+import { startRetryScheduler } from "./lib/retry-scheduler.js";
 import {
   PORT,
   SAVED_SEARCH_ANALYZER_ENABLED,
@@ -31,10 +33,13 @@ import {
   generateRunId,
   matchRunLogPath,
   matchRunInputPath,
+  matchRunResultsPath,
   ensureMatchRunDir,
   executeMatchRun,
   executeMatchRunFromInput,
   markOrphanedRunsFailed,
+  killRun,
+  runIdFromItemId,
   parseJobPost,
   persistParsedMetadata,
 } from "./lib/match-run.js";
@@ -181,10 +186,15 @@ app.get("/api/crawl-status", async (_req, res) => {
 });
 
 app.get("/api/config", (_req, res) => {
+  const scorers = (process.env.NVIDIA_ENSEMBLE_SCORERS || "meta/llama-4-maverick-17b-128e-instruct,moonshotai/kimi-k2-instruct,nvidia/llama-3.3-nemotron-super-49b-v1.5")
+    .split(",").map((s) => s.trim().split("/").pop() ?? s.trim()).filter(Boolean);
+  const synthesizer = (process.env.NVIDIA_ENSEMBLE_SYNTHESIZER || "nvidia/llama-3.3-nemotron-super-49b-v1.5")
+    .trim().split("/").pop() ?? "";
   res.json({
     logoDevPublishableKey: LOGO_DEV_PUBLISHABLE_KEY || null,
     hasLogoDevBrandSearch: Boolean(LOGO_DEV_SECRET_KEY),
     matcherEnabled: true,
+    ensemble: { scorers, synthesizer },
   });
 });
 
@@ -442,9 +452,102 @@ app.get("/api/job-parsed", async (req, res) => {
   }
 });
 
+app.get("/api/queue", async (_req, res) => {
+  const items = await readQueue();
+  res.json(items);
+});
+
+app.post("/api/queue/:id/retry", async (req, res) => {
+  const { id } = req.params;
+  const items = await readQueue();
+  const item = items.find((i) => i.id === id);
+  if (!item) {
+    res.status(404).json({ error: "Queue item not found" });
+    return;
+  }
+  const reset = {
+    ...item,
+    status: "todo" as const,
+    attempt: 0,
+    next_retry_at: undefined,
+    error: undefined,
+    updated_at: new Date().toISOString(),
+  };
+  await upsertQueueItem(reset);
+
+  // Fire immediately (discord-only or full run)
+  const isDiscordOnly = item.subtasks.length === 1 && item.subtasks[0]?.id === "discord";
+  if (isDiscordOnly) {
+    // Let the scheduler pick it up on next tick by marking retrying with next_retry_at = now
+    await upsertQueueItem({ ...reset, status: "retrying", next_retry_at: new Date().toISOString() });
+  } else {
+    void executeMatchRunFromInput(runIdFromItemId(item.id), item.mode);
+  }
+
+  res.json({ ok: true });
+});
+
+app.post("/api/queue/:id/stop", async (req, res) => {
+  const { id } = req.params;
+  const killed = killRun(runIdFromItemId(id));
+  const items = await readQueue();
+  const item = items.find((i) => i.id === id);
+  if (item) {
+    await upsertQueueItem({
+      ...item,
+      status: "permanent_error",
+      error: "Stopped by user",
+      subtasks: item.subtasks.map((s) =>
+        s.status === "running" || s.status === "todo" ? { ...s, status: "error" as const, error: "Stopped" } : s,
+      ),
+      updated_at: new Date().toISOString(),
+    });
+  }
+  const runId = runIdFromItemId(id);
+  const manifest = await readManifest(runId);
+  if (manifest && manifest.status === "running") {
+    await writeManifest({ ...manifest, status: "failed", finished_at: new Date().toISOString(), error: "Stopped by user" });
+  }
+  res.json({ ok: true, killed });
+});
+
+app.post("/api/queue/:id/restart", async (req, res) => {
+  const { id } = req.params;
+  const runId = runIdFromItemId(id);
+  // Kill running process if any
+  killRun(runId);
+  const items = await readQueue();
+  const item = items.find((i) => i.id === id);
+  if (!item) {
+    res.status(404).json({ error: "Queue item not found" });
+    return;
+  }
+  // Reset attempt count and timestamps so the timer starts fresh
+  const now = new Date().toISOString();
+  const reset = { ...item, status: "todo" as const, attempt: 1, next_retry_at: undefined, error: undefined,
+    created_at: now, updated_at: now,
+    subtasks: item.subtasks.map((s) => ({ ...s, status: "todo" as const, error: undefined, started_at: undefined, finished_at: undefined })) };
+  await upsertQueueItem(reset);
+  void executeMatchRunFromInput(runId, item.mode);
+  res.json({ ok: true });
+});
+
+app.delete("/api/queue/:id", async (req, res) => {
+  const { id } = req.params;
+  const runId = runIdFromItemId(id);
+  killRun(runId);
+  await removeQueueItem(id);
+  const manifest = await readManifest(runId);
+  if (manifest && (manifest.status === "running" || manifest.status === "queued")) {
+    await writeManifest({ ...manifest, status: "failed", finished_at: new Date().toISOString(), error: "Deleted by user" });
+  }
+  res.json({ ok: true });
+});
+
 app.listen(PORT, async () => {
   await mkdir(MATCH_RUNS_DIR, { recursive: true });
   await markOrphanedRunsFailed();
+  startRetryScheduler();
   console.log(`viewer listening on http://localhost:${PORT}`);
   if (SAVED_SEARCH_ANALYZER_ENABLED) {
     setTimeout(() => void runSavedSearchAnalyzerOnce(), 5000);

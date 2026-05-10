@@ -846,53 +846,35 @@
     return PIPELINES[mode]?.dur || '~25 sec';
   }
 
+  let lastAutoAnalyzerPaused = null;
+
   function renderAutoAnalyzerToast(status) {
     const enabled = Boolean(status?.enabled);
-    if (!enabled) return;
-
     const paused = Boolean(status?.paused);
     const current = status?.current;
-    const isRunning = Boolean(current);
-    const title = paused
-      ? 'Auto analyze fit paused'
-      : isRunning
-        ? 'Auto analyze fit is running'
-        : 'Auto analyze fit is watching saved searches';
-    const body = isRunning
-      ? `${current.job?.title || 'Job'} · ${current.job?.company || ''}`
-      : paused
-        ? 'Saved-search full analysis is stopped.'
-        : 'Waiting for the next unanalyzed saved-search match.';
-    const sig = JSON.stringify([title, body, paused]);
-    if (autoAnalyzerNotifId && autoAnalyzerToastSig === sig) return;
 
-    if (autoAnalyzerNotifId) dismissNotif(autoAnalyzerNotifId);
-    autoAnalyzerNotifId = pushNotif(
-      'neutral',
-      title,
-      body,
-      false,
-      null,
-      [
-        {
-          label: paused ? 'Resume auto analyze' : 'Stop auto analyze',
-          className: paused ? 'btn btn-success btn-sm' : 'btn btn-danger btn-sm',
-          autoDismiss: false,
-          onClick: async () => {
-            try {
-              await fetch('/api/auto-analyzer', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ paused: !paused })
-              });
-            } catch {}
+    // Update drawer toggle button
+    const aaBtn = document.getElementById('qi-autoanalyze-btn');
+    if (aaBtn) {
+      if (enabled) {
+        aaBtn.style.display = '';
+        aaBtn.textContent = paused ? '▶ Auto-analyze' : '⏸ Auto-analyze';
+        aaBtn.className = `qi-autoanalyze-btn${paused ? ' qi-aa-paused' : ' qi-aa-running'}`;
+        aaBtn.title = paused ? 'Resume auto-analyze' : 'Pause auto-analyze';
+        if (lastAutoAnalyzerPaused !== paused) {
+          aaBtn.onclick = async () => {
+            try { await fetch('/api/auto-analyzer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: !paused }) }); } catch {}
             updateAutoAnalyzerStatus();
-          }
+          };
+          lastAutoAnalyzerPaused = paused;
         }
-      ],
-      { hideClose: true }
-    );
-    autoAnalyzerToastSig = sig;
+      } else {
+        aaBtn.style.display = 'none';
+      }
+    }
+
+    // Dismiss old bottom-left toast if it exists (replaced by drawer button)
+    if (autoAnalyzerNotifId) { dismissNotif(autoAnalyzerNotifId); autoAnalyzerNotifId = null; }
   }
 
   async function updateAutoAnalyzerStatus() {
@@ -1534,6 +1516,7 @@
       logoDevPublishableKey = typeof data.logoDevPublishableKey === 'string' && data.logoDevPublishableKey.trim() ? data.logoDevPublishableKey.trim() : null;
       hasLogoDevBrandSearch = Boolean(data.hasLogoDevBrandSearch);
       matcherEnabled        = Boolean(data.matcherEnabled);
+      if (data.ensemble) ensembleConfig = data.ensemble;
       renderCurrentView();
     } catch {}
   }
@@ -1671,6 +1654,201 @@
       jdModalBody.innerHTML = `<div class="jd-error">Error: ${esc(err.message || String(err))}</div>`;
     }
   }
+
+  /* ── Queue drawer ────────────────────────────────────────────── */
+  const QUEUE_ACTIVE_STATUSES = new Set(['todo', 'running', 'retrying', 'error']);
+  const STATUS_ICON = { todo: '–', running: '↻', retrying: '↻', done: '✓', error: '✗', permanent_error: '⛔' };
+  const STATUS_PILL_CLASS = {
+    todo: 'qi-pill-todo', running: 'qi-pill-running', retrying: 'qi-pill-retrying',
+    done: 'qi-pill-done', error: 'qi-pill-error', permanent_error: 'qi-pill-permanent_error',
+  };
+  const STATUS_LABEL = {
+    todo: 'queued', running: 'running', retrying: 'retrying',
+    done: 'done', error: 'error', permanent_error: 'failed',
+  };
+
+  let queueDrawerOpen = false;
+  let queuePollTimer = null;
+  let queueTickTimer = null;
+  let lastQueueItems = [];
+  let ensembleConfig = { scorers: [], synthesizer: '' }; // filled by fetchConfig
+
+  const queueBtn    = document.getElementById('queue-btn');
+  const queueBadge  = document.getElementById('queue-badge');
+  const queueOverlay = document.getElementById('queue-overlay');
+  const queueDrawer  = document.getElementById('queue-drawer');
+  const queueBody    = document.getElementById('queue-drawer-body');
+  const queueClose   = document.getElementById('queue-drawer-close');
+
+  function openQueueDrawer() {
+    queueDrawerOpen = true;
+    queueDrawer.classList.add('open');
+    queueOverlay.classList.add('open');
+    startQueuePoll();
+  }
+
+  function closeQueueDrawer() {
+    queueDrawerOpen = false;
+    queueDrawer.classList.remove('open');
+    queueOverlay.classList.remove('open');
+    stopQueuePoll();
+  }
+
+  queueBtn.addEventListener('click', () => queueDrawerOpen ? closeQueueDrawer() : openQueueDrawer());
+  queueClose.addEventListener('click', closeQueueDrawer);
+  queueOverlay.addEventListener('click', closeQueueDrawer);
+
+  function fmtElapsed(ms) {
+    if (ms < 0) ms = 0;
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60), rs = s % 60;
+    return `${m}m${rs > 0 ? ` ${rs}s` : ''}`;
+  }
+
+  const TERMINAL_STATUSES = new Set(['done', 'error', 'permanent_error']);
+  function subtaskElapsed(s, itemStatus) {
+    if (s.status === 'todo') return '';
+    const start = s.started_at ? new Date(s.started_at).getTime() : null;
+    const end   = s.finished_at ? new Date(s.finished_at).getTime() : null;
+    if (!start) return '';
+    const ongoing = !end && !TERMINAL_STATUSES.has(itemStatus);
+    const ms = ongoing ? Date.now() - start : (end ? end - start : Date.now() - start);
+    return `<span class="qi-subtask-timer${ongoing ? ' qi-timer-live' : ''}" data-start="${s.started_at}" ${end ? `data-end="${s.finished_at}"` : ''}>${fmtElapsed(ms)}</span>`;
+  }
+
+  function itemElapsed(item) {
+    const start = item.created_at ? new Date(item.created_at).getTime() : null;
+    if (!start) return '';
+    const endTs = item.updated_at && item.status !== 'running' ? new Date(item.updated_at).getTime() : null;
+    const ongoing = item.status === 'running' || item.status === 'retrying';
+    const ms = ongoing ? Date.now() - start : (endTs ? endTs - start : 0);
+    return `<span class="qi-item-timer${ongoing ? ' qi-timer-live' : ''}" data-start="${item.created_at}" ${!ongoing && endTs ? `data-end="${item.updated_at}"` : ''}>${fmtElapsed(ms)}</span>`;
+  }
+
+  function tickTimers() {
+    const now = Date.now();
+    queueBody.querySelectorAll('.qi-timer-live').forEach(el => {
+      const start = new Date(el.dataset.start).getTime();
+      el.textContent = fmtElapsed(now - start);
+    });
+  }
+
+  function renderQueueItems(items) {
+    lastQueueItems = items;
+    const active = items.filter(i => QUEUE_ACTIVE_STATUSES.has(i.status));
+    const badge = active.length;
+    queueBadge.textContent = String(badge);
+    queueBtn.style.display = 'inline-flex';
+
+    if (!queueDrawerOpen) return;
+    if (items.length === 0) {
+      queueBody.innerHTML = '<p class="queue-empty-msg">No items in queue.</p>';
+      return;
+    }
+
+    // Sort: running first, then retrying, error, todo, permanent_error, done
+    const ORDER = { running: 0, retrying: 1, error: 2, todo: 3, permanent_error: 4, done: 5 };
+    const sorted = [...items].sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9));
+
+    queueBody.innerHTML = sorted.map(item => {
+      const isDone = item.status === 'done';
+      const isErr = item.status === 'permanent_error' || item.status === 'error';
+      const pillClass = STATUS_PILL_CLASS[item.status] ?? 'qi-pill-todo';
+      const pillLabel = STATUS_LABEL[item.status] ?? item.status;
+
+      const subtasksHtml = item.subtasks.map(s => `
+        <div class="qi-subtask st-${esc(s.status)}">
+          <span class="qi-subtask-icon">${s.status === 'running' || s.status === 'retrying' ? '<span class="btn-spinner"></span>' : (STATUS_ICON[s.status] ?? '–')}</span>
+          <span class="qi-subtask-label">${esc(s.label)}</span>
+          ${subtaskElapsed(s, item.status)}
+          ${s.error ? `<span class="qi-subtask-error" title="${esc(s.error)}">${esc(s.error)}</span>` : ''}
+        </div>`).join('');
+
+      const retryInfo = item.status === 'retrying' && item.next_retry_at
+        ? `<div class="qi-retry-info">Attempt ${item.attempt}/${item.max_attempts} · retry at ${new Date(item.next_retry_at).toLocaleTimeString()}</div>`
+        : item.attempt > 1
+        ? `<div class="qi-retry-info">Attempt ${item.attempt}/${item.max_attempts}</div>`
+        : '';
+
+      const errHtml = item.error && isErr
+        ? `<div class="qi-error-msg">${esc(item.error)}</div>`
+        : '';
+
+      const isActive = item.status === 'running' || item.status === 'todo' || item.status === 'retrying';
+      const actions = `
+        <div class="qi-actions">
+          ${isActive
+            ? `<button class="qi-btn qi-btn-stop" data-id="${esc(item.id)}" data-action="stop" title="Stop">■ Stop</button>`
+            : `<button class="qi-btn qi-btn-restart" data-id="${esc(item.id)}" data-action="restart" title="Restart">⟳ Restart</button>`}
+          <button class="qi-btn qi-btn-dismiss" data-id="${esc(item.id)}" data-action="dismiss" title="Remove from queue">✕</button>
+        </div>`;
+
+      return `
+        <div class="qi-card ${isDone ? 'qi-done' : ''}" data-qi-id="${esc(item.id)}">
+          <div class="qi-header">
+            <div>
+              <div class="qi-title">${esc(item.title)}</div>
+              <div class="qi-company">${esc(item.company)}</div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0">
+              <span class="qi-status-pill ${pillClass}">${pillLabel}</span>
+              ${item.status === 'done' && item.score != null ? `<span class="qi-score-badge">${item.score.toFixed(1)} / 5</span>` : ''}
+              <span class="qi-item-timer-wrap">Duration: ${itemElapsed(item)}</span>
+              ${item.updated_at ? `<span class="qi-last-run">Updated at: ${new Date(item.updated_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>` : ''}
+            </div>
+          </div>
+          <div class="qi-subtasks">${subtasksHtml}</div>
+          ${retryInfo}${errHtml}${actions}
+        </div>`;
+    }).join('');
+
+    // Wire action buttons
+    queueBody.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const action = btn.dataset.action;
+        btn.disabled = true;
+        try {
+          if (action === 'stop') {
+            await fetch(`/api/queue/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+          } else if (action === 'restart') {
+            await fetch(`/api/queue/${encodeURIComponent(id)}/restart`, { method: 'POST' });
+          } else if (action === 'dismiss') {
+            await fetch(`/api/queue/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          }
+          await fetchQueue();
+        } catch (e) {
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  async function fetchQueue() {
+    try {
+      const res = await fetch('/api/queue');
+      if (!res.ok) return;
+      const items = await res.json();
+      renderQueueItems(items);
+    } catch (_) {}
+  }
+
+  function startQueuePoll() {
+    if (queuePollTimer) return;
+    fetchQueue();
+    queuePollTimer = setInterval(fetchQueue, 3000);
+    queueTickTimer = setInterval(tickTimers, 1000);
+  }
+
+  function stopQueuePoll() {
+    if (queuePollTimer) { clearInterval(queuePollTimer); queuePollTimer = null; }
+    if (queueTickTimer) { clearInterval(queueTickTimer); queueTickTimer = null; }
+  }
+
+  // Lightweight background poll to keep badge fresh (every 15s when drawer is closed)
+  setInterval(() => { if (!queueDrawerOpen) fetchQueue(); }, 15000);
+  fetchQueue();
 
   /* ── Boot ────────────────────────────────────────────────────── */
   const bootPage = restoreFromUrl();

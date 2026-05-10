@@ -19,7 +19,26 @@
       <div class="sub" id="header-sub">Loading…</div>
     </div>
     <div class="meta" id="header-meta"></div>
+    <button class="queue-btn" id="queue-btn" aria-label="Queue" title="Analysis queue">
+      <span class="queue-btn-label">Queue</span>
+      <span class="queue-btn-badge" id="queue-badge"></span>
+    </button>
   </header>
+
+  <!-- Queue drawer -->
+  <div class="queue-overlay" id="queue-overlay"></div>
+  <aside class="queue-drawer" id="queue-drawer" aria-label="Analysis queue">
+    <div class="queue-drawer-header">
+      <span class="queue-drawer-title">Analysis queue</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="qi-autoanalyze-btn" id="qi-autoanalyze-btn" title="Toggle auto-analyze" style="display:none"></button>
+        <button class="queue-drawer-close" id="queue-drawer-close" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div class="queue-drawer-body" id="queue-drawer-body">
+      <p class="queue-empty-msg">No items in queue.</p>
+    </div>
+  </aside>
 
   <!-- Filters -->
   <section class="filters-panel">

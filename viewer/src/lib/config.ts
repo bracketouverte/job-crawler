@@ -10,6 +10,7 @@ export const MATCH_RUNS_DIR = process.env.MATCH_RUNS_DIR ?? join(STATE_DIR, "mat
 export const ANALYSIS_CACHE_PATH = process.env.ANALYSIS_CACHE_PATH ?? join(STATE_DIR, "job-analysis-cache.json");
 export const HIDDEN_JOBS_PATH = process.env.HIDDEN_JOBS_PATH ?? join(STATE_DIR, "hidden-jobs.json");
 export const SCORE_NOTIFICATIONS_PATH = process.env.SCORE_NOTIFICATIONS_PATH ?? join(STATE_DIR, "score-notifications.json");
+export const RETRY_QUEUE_PATH = process.env.RETRY_QUEUE_PATH ?? join(STATE_DIR, "retry-queue.json");
 export const MATCHER_DIR = process.env.MATCHER_DIR ?? "/matcher";
 export const PYTHON_BIN = process.env.PYTHON_BIN ?? "python3";
 export const CAREER_OPS_DIR = process.env.CAREER_OPS_DIR?.trim() ?? "career-ops";
@@ -30,6 +31,7 @@ export const LOGO_CACHE_MAX = 2000;
 // Global mutable state
 export const logoDevBrandCache = new Map<string, string | null>();
 export const activeRunIds = new Set<string>();
+export const activeRunProcesses = new Map<string, import("node:child_process").ChildProcess>();
 export let savedSearchAnalyzerBusy = false;
 export let savedSearchAnalyzerPaused = false;
 export let savedSearchAnalyzerCurrent: {

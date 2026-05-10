@@ -9,6 +9,7 @@ import {
 import { companyLogoUrl, companyWebsite, normalizeLabel, jobMode, jobCompensation, decisionEmoji } from "./company.js";
 import { analysisScore5 } from "./analysis.js";
 import { selectJobUrlStatement } from "./db.js";
+import { upsertQueueItem } from "./queue.js";
 
 export async function readScoreNotifications(): Promise<ScoreNotificationsState> {
   try {
@@ -84,7 +85,25 @@ export async function notifyDiscordForScore(row: Record<string, unknown>, runId:
   });
 
   if (!response.ok) {
-    throw new Error(`Discord webhook failed with status ${response.status}`);
+    const errMsg = `Discord webhook failed with status ${response.status}`;
+    // Enqueue a discord-only retry item; store the row JSON in error field for the scheduler to re-use
+    const discordQueueId = `discord_${runId}_${row.provider}_${row.source_key}_${row.job_id}`.replace(/[^a-z0-9_]/gi, "_");
+    await upsertQueueItem({
+      id: discordQueueId,
+      job_key: `${row.provider}|${row.source_key}|${row.job_id}`,
+      title: String(row.title ?? "Job"),
+      company: String(row.company ?? row.source_key ?? ""),
+      mode: "discord-only",
+      status: "retrying",
+      subtasks: [{ id: "discord", label: "Discord push", status: "error", error: errMsg }],
+      attempt: 1,
+      max_attempts: 3,
+      next_retry_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      error: JSON.stringify({ ...row, _run_id: runId }),
+    });
+    throw new Error(errMsg);
   }
 
   notifications.sent[key] = {

@@ -1,18 +1,20 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { appendFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import type { JobRow, MatchRunManifest, ParsedJobPost, RunCommandOptions } from "./types.js";
+import type { JobRow, MatchRunManifest, ParsedJobPost, RunCommandOptions, QueueItem, QueueSubtask, QueueTaskStatus } from "./types.js";
 import {
   MATCH_RUNS_DIR,
   MATCHER_DIR,
   PYTHON_BIN,
   CAREER_OPS_DIR,
   activeRunIds,
+  activeRunProcesses,
 } from "./config.js";
 import { db, updateParsedMetadataStatement, sanitizeJob, isRealCompensation } from "./db.js";
 import { companyName } from "./company.js";
 import { persistRunResults } from "./analysis.js";
 import { notifyDiscordForScore } from "./notifications.js";
+import { readQueue, upsertQueueItem } from "./queue.js";
 
 export function matchRunDir(runId: string): string {
   return join(MATCH_RUNS_DIR, runId);
@@ -103,6 +105,8 @@ export function runCommand(command: string, args: string[], options: RunCommandO
     const logFile = options.logFile;
     const logStdout = options.logStdout ?? true;
     const logStderr = options.logStderr ?? true;
+    const onLine = options.onLine;
+    options.onSpawn?.(child);
     const logTasks: Array<Promise<unknown>> = [];
 
     const writeRunLog = (stream: "stdout" | "stderr", line: string): void => {
@@ -118,6 +122,7 @@ export function runCommand(command: string, args: string[], options: RunCommandO
       if (logFile) {
         logTasks.push(appendFile(logFile, `${rendered}\n`, "utf8"));
       }
+      onLine?.(line);
     };
 
     child.stdout.on("data", (chunk) => {
@@ -329,26 +334,128 @@ export async function executeMatchRunFromInput(runId: string, mode?: string): Pr
   const manifest = await readManifest(runId);
   if (manifest === null) return;
   activeRunIds.add(runId);
+
+  const effectiveMode = mode ?? "claude-ensemble";
+  const now = new Date().toISOString();
+
+  // Build one QueueItem per job using the same composite ID scheme as executeMatchRun.
+  // On retry the existing items are found and their attempt counter preserved.
+  const existingItems = await readQueue();
+  const manifestJobs = manifest.jobs.length > 0 ? manifest.jobs : [{ provider: "", source_key: runId, job_id: runId, title: "Unknown job", company: "" }];
+
+  const queueItems: QueueItem[] = manifestJobs.map((job) => {
+    const jobKey = `${job.provider}|${job.source_key}|${job.job_id}`;
+    const itemId = `${runId}:${jobKey}`;
+    const existing = existingItems.find((i) => i.id === itemId);
+    const base: QueueItem = existing ?? {
+      id: itemId,
+      job_key: jobKey,
+      title: job.title ?? "Unknown job",
+      company: job.company ?? "",
+      mode: effectiveMode,
+      status: "running",
+      subtasks: buildSubtasks(effectiveMode),
+      attempt: 1,
+      max_attempts: 3,
+      created_at: now,
+      updated_at: now,
+    };
+    return {
+      ...base,
+      status: "running" as QueueTaskStatus,
+      subtasks: base.subtasks.map((s) => ({ ...s, status: "todo" as QueueTaskStatus, error: undefined, started_at: undefined, finished_at: undefined })),
+      updated_at: now,
+    };
+  });
+
+  await Promise.all(queueItems.map(upsertQueueItem));
+
+  const perJobHandlers = queueItems.map((qi, idx) => {
+    const job = manifestJobs[idx];
+    const label = `${job?.company ?? qi.company} | ${job?.title ?? qi.title}`;
+    let current = qi;
+    return makeLogLineHandler(current, label, (updated) => {
+      current = updated;
+      queueItems[idx] = updated;
+      upsertQueueItem(updated).catch(() => {});
+    });
+  });
+  const logLineHandler = makeBatchLogLineHandler(perJobHandlers);
+
+  const markDiscordRunning = (): void => {
+    for (let i = 0; i < queueItems.length; i++) {
+      queueItems[i] = { ...queueItems[i], subtasks: queueItems[i].subtasks.map((s) => s.id === "discord" ? { ...s, status: "running" as QueueTaskStatus, started_at: new Date().toISOString() } : s), updated_at: new Date().toISOString() };
+      upsertQueueItem(queueItems[i]).catch(() => {});
+    }
+  };
+
+  const markAllDone = (scoreByJobKey?: Map<string, number>): void => {
+    for (let i = 0; i < queueItems.length; i++) {
+      const score = scoreByJobKey?.get(queueItems[i].job_key);
+      queueItems[i] = { ...queueItems[i], status: "done", ...(score !== undefined ? { score } : {}), subtasks: queueItems[i].subtasks.map((s) => s.id === "discord" ? { ...s, status: "done" as QueueTaskStatus, finished_at: new Date().toISOString() } : s), updated_at: new Date().toISOString() };
+      upsertQueueItem(queueItems[i]).catch(() => {});
+    }
+  };
+
+  const markAllFailed = (errMsg: string, isPermanent: boolean, nextAttempt: number): void => {
+    for (let i = 0; i < queueItems.length; i++) {
+      queueItems[i] = {
+        ...queueItems[i],
+        attempt: nextAttempt,
+        status: isPermanent ? "permanent_error" : "retrying",
+        next_retry_at: isPermanent ? undefined : new Date(Date.now() + 30 * 2 ** nextAttempt * 1000).toISOString(),
+        error: errMsg,
+        subtasks: queueItems[i].subtasks.map((s) => s.status === "todo" || s.status === "running" ? { ...s, status: "error" as QueueTaskStatus } : s),
+        updated_at: new Date().toISOString(),
+      };
+      upsertQueueItem(queueItems[i]).catch(() => {});
+    }
+  };
+
   try {
     await writeManifest({ ...manifest, status: "running", started_at: new Date().toISOString() });
     await writeFile(matchRunLogPath(runId), "", "utf8");
-    const isEnsemble = mode === "claude-ensemble";
+    const isEnsemble = effectiveMode === "claude-ensemble";
     const script = isEnsemble ? join(MATCHER_DIR, "ensemble_runner.py") : join(MATCHER_DIR, "job_fit_analyzer.py");
     const pipelineTag = isEnsemble ? "claude-ensemble" : "claude";
     await runCommand(PYTHON_BIN, [script, "--jobs-jsonl", matchRunInputPath(runId), "--results-jsonl",
       matchRunResultsPath(runId), "--profile-dir", join(MATCHER_DIR, CAREER_OPS_DIR), "--pipeline", pipelineTag],
-      { env: process.env, logPrefix: `match-run ${runId}`, logFile: matchRunLogPath(runId) });
+      { env: process.env, logPrefix: `match-run ${runId}`, logFile: matchRunLogPath(runId), onLine: logLineHandler, onSpawn: (child) => activeRunProcesses.set(runId, child) });
+
     const results = await readJsonl(matchRunResultsPath(runId)) as Array<Record<string, unknown>>;
     const matchedCount = results.filter((row) => row.status === "ok").length;
+    const failedCount = results.filter((row) => row.status === "error").length;
+    if (results.length > 0 && matchedCount === 0 && failedCount === results.length) {
+      const firstError = results[0]?.error as string | undefined;
+      throw new Error(firstError ?? "All jobs failed in Python pipeline");
+    }
+
+    const scoreByJobKey = new Map<string, number>();
+    for (const row of results) {
+      if (row.status === "ok") {
+        const key = `${row.provider}|${row.source_key}|${row.job_id}`;
+        const score5 = (row.analysis as Record<string, unknown>)?.score_5 as number | undefined;
+        if (score5 !== undefined) scoreByJobKey.set(key, score5);
+      }
+    }
+
+    markDiscordRunning();
     await persistRunResults(runId, results, notifyDiscordForScore);
+    markAllDone(scoreByJobKey);
+
     await writeManifest({ ...manifest, status: "completed", finished_at: new Date().toISOString(),
       matched_count: matchedCount, failed_count: results.length - matchedCount });
   } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
     console.error(`executeMatchRunFromInput ${runId} error:`, err);
+    const nextAttempt = (queueItems[0]?.attempt ?? 0) + 1;
+    const isPermanent = nextAttempt >= (queueItems[0]?.max_attempts ?? 3);
+    markAllFailed(errMsg, isPermanent, nextAttempt);
     await writeManifest({ ...manifest, status: "failed", finished_at: new Date().toISOString(),
-      error: err instanceof Error ? err.message : String(err) });
+      error: errMsg });
   } finally {
     activeRunIds.delete(runId);
+    activeRunProcesses.delete(runId);
   }
 }
 
@@ -359,6 +466,67 @@ export async function executeMatchRun(runId: string, jobs: JobRow[], mode?: stri
   }
 
   activeRunIds.add(runId);
+
+  const effectiveMode = mode ?? "claude";
+  const now = new Date().toISOString();
+
+  // One QueueItem per job so subtask state never mixes between different positions
+  const queueItems: QueueItem[] = jobs.map((job) => ({
+    id: `${runId}:${job.provider}|${job.source_key}|${job.job_id}`,
+    job_key: `${job.provider}|${job.source_key}|${job.job_id}`,
+    title: job.title ?? "Unknown job",
+    company: companyName(job),
+    mode: effectiveMode,
+    status: "running" as QueueTaskStatus,
+    subtasks: buildSubtasks(effectiveMode),
+    attempt: 1,
+    max_attempts: 3,
+    created_at: now,
+    updated_at: now,
+  }));
+  // Fallback for empty job list
+  if (queueItems.length === 0) {
+    queueItems.push({ id: runId, job_key: runId, title: "Unknown job", company: "", mode: effectiveMode, status: "running", subtasks: buildSubtasks(effectiveMode), attempt: 1, max_attempts: 3, created_at: now, updated_at: now });
+  }
+  await Promise.all(queueItems.map(upsertQueueItem));
+
+  // Per-job log handlers, scoped by job label (Company | Title)
+  const perJobHandlers = queueItems.map((qi, idx) => {
+    const job = jobs[idx];
+    const label = job ? `${companyName(job)} | ${job.title ?? job.job_id}` : qi.id;
+    let current = qi;
+    return makeLogLineHandler(current, label, (updated) => {
+      current = updated;
+      upsertQueueItem(updated).catch(() => {});
+      // keep reference in sync for error handler below
+      queueItems[idx] = updated;
+    });
+  });
+  const logLineHandler = makeBatchLogLineHandler(perJobHandlers);
+
+  const markAllDone = async (subtaskId: string, patch: Partial<QueueSubtask>): Promise<void> => {
+    await Promise.all(queueItems.map((qi) =>
+      upsertQueueItem({ ...qi, subtasks: qi.subtasks.map((s) => s.id === subtaskId ? { ...s, ...patch } : s), updated_at: new Date().toISOString() })
+    ));
+  };
+
+  const markAllFinished = async (status: QueueTaskStatus, errMsg?: string, scoreByJobKey?: Map<string, number>): Promise<void> => {
+    const nextAttempt = (queueItems[0]?.attempt ?? 1) + 1;
+    const isPermanent = nextAttempt >= (queueItems[0]?.max_attempts ?? 3);
+    await Promise.all(queueItems.map((qi) => {
+      const score = status === "done" ? scoreByJobKey?.get(qi.job_key) : undefined;
+      return upsertQueueItem({
+        ...qi,
+        attempt: nextAttempt,
+        status: status === "done" ? "done" : (isPermanent ? "permanent_error" : "retrying"),
+        next_retry_at: status !== "done" && !isPermanent ? new Date(Date.now() + 30 * 2 ** nextAttempt * 1000).toISOString() : undefined,
+        error: errMsg,
+        ...(score !== undefined ? { score } : {}),
+        subtasks: status === "done" ? qi.subtasks : qi.subtasks.map((s) => s.status === "todo" || s.status === "running" ? { ...s, status: "error" as QueueTaskStatus } : s),
+        updated_at: new Date().toISOString(),
+      });
+    }));
+  };
 
   try {
     const runningManifest: MatchRunManifest = {
@@ -371,7 +539,7 @@ export async function executeMatchRun(runId: string, jobs: JobRow[], mode?: stri
     const preparedManifest = await writeBatchInput(runId, jobs, runningManifest);
     await writeManifest(preparedManifest);
 
-    const isEnsemble = mode === "claude-ensemble";
+    const isEnsemble = effectiveMode === "claude-ensemble";
     const script = isEnsemble
       ? join(MATCHER_DIR, "ensemble_runner.py")
       : join(MATCHER_DIR, "job_fit_analyzer.py");
@@ -394,13 +562,31 @@ export async function executeMatchRun(runId: string, jobs: JobRow[], mode?: stri
         env: process.env,
         logPrefix: `match-run ${runId}`,
         logFile: matchRunLogPath(runId),
+        onLine: logLineHandler,
+        onSpawn: (child) => activeRunProcesses.set(runId, child),
       }
     );
 
     const results = await readJsonl(matchRunResultsPath(runId)) as Array<Record<string, unknown>>;
     const matchedCount = results.filter((row) => row.status === "ok").length;
     const failedCount = results.length - matchedCount;
+    if (results.length > 0 && matchedCount === 0 && failedCount === results.length) {
+      const firstError = results[0]?.error as string | undefined;
+      throw new Error(firstError ?? "All jobs failed in Python pipeline");
+    }
+
+    const scoreByJobKey = new Map<string, number>();
+    for (const row of results) {
+      if (row.status === "ok") {
+        const key = `${row.provider}|${row.source_key}|${row.job_id}`;
+        const score5 = (row.analysis as Record<string, unknown>)?.score_5 as number | undefined;
+        if (score5 !== undefined) scoreByJobKey.set(key, score5);
+      }
+    }
+
+    await markAllDone("discord", { status: "running", started_at: new Date().toISOString() });
     await persistRunResults(runId, results, notifyDiscordForScore);
+    await markAllFinished("done", undefined, scoreByJobKey);
 
     await writeManifest({
       ...preparedManifest,
@@ -413,17 +599,149 @@ export async function executeMatchRun(runId: string, jobs: JobRow[], mode?: stri
       error: null,
     });
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    await markAllFinished("error", errMsg);
     await writeManifest({
       ...manifest,
       status: "failed",
       finished_at: new Date().toISOString(),
-      error: error instanceof Error ? error.message : String(error),
+      error: errMsg,
       result_file: matchRunResultsPath(runId),
       log_file: matchRunLogPath(runId),
     });
   } finally {
     activeRunIds.delete(runId);
+    activeRunProcesses.delete(runId);
   }
+}
+
+/** Extract the run ID from a composite queue item ID (`${runId}:${jobKey}`). */
+export function runIdFromItemId(itemId: string): string {
+  const colonIdx = itemId.indexOf(":");
+  return colonIdx === -1 ? itemId : itemId.slice(0, colonIdx);
+}
+
+export function killRun(runId: string): boolean {
+  const child = activeRunProcesses.get(runId);
+  if (!child) return false;
+  child.kill("SIGTERM");
+  activeRunProcesses.delete(runId);
+  return true;
+}
+
+// --- Queue helpers ---
+
+const ENSEMBLE_SCORER_LABELS: Record<string, string> = {
+  "llama-4-maverick-17b-128e-instruct": "Maverick scorer",
+  "kimi-k2-instruct": "Kimi-K2 scorer",
+  "llama-3.3-nemotron-super-49b-v1.5": "Nemotron scorer",
+};
+
+function shortModelName(fullId: string): string {
+  return fullId.split("/").pop() ?? fullId;
+}
+
+function buildSubtasks(mode: string): QueueSubtask[] {
+  if (mode === "claude-ensemble") {
+    const scorerEnv = process.env.NVIDIA_ENSEMBLE_SCORERS || "meta/llama-4-maverick-17b-128e-instruct,moonshotai/kimi-k2-instruct,nvidia/llama-3.3-nemotron-super-49b-v1.5";
+    const synthEnv = process.env.NVIDIA_ENSEMBLE_SYNTHESIZER || "nvidia/llama-3.3-nemotron-super-49b-v1.5";
+    const scorerIds = ["scorer:maverick", "scorer:kimi", "scorer:nemotron"];
+    const scorerSubtasks = scorerEnv.split(",").map((m, i) => ({
+      id: scorerIds[i] ?? `scorer:${i}`,
+      label: `${shortModelName(m.trim())} (scorer)`,
+      status: "todo" as QueueTaskStatus,
+    }));
+    return [
+      ...scorerSubtasks,
+      { id: "synthesis", label: `${shortModelName(synthEnv)} (synthesis)`, status: "todo" },
+      { id: "discord", label: "Discord push", status: "todo" },
+    ];
+  }
+  const singleModel = process.env.NVIDIA_MODEL ?? "llama-4-maverick-17b-128e-instruct";
+  return [
+    { id: "model:claude", label: `${shortModelName(singleModel)} (scorer)`, status: "todo" },
+    { id: "discord", label: "Discord push", status: "todo" },
+  ];
+}
+
+function scorerSubtaskId(modelName: string): string | null {
+  if (modelName.includes("maverick")) return "scorer:maverick";
+  if (modelName.includes("kimi")) return "scorer:kimi";
+  if (modelName.includes("nemotron")) return "scorer:nemotron";
+  return null;
+}
+
+// jobLabel matches the Python log format: "Company | Title"
+function makeLogLineHandler(
+  item: QueueItem,
+  jobLabel: string,
+  onUpdate: (updated: QueueItem) => void,
+): (line: string) => void {
+  let current = item;
+  // Escape the label for use in a regex
+  const labelPattern = jobLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const forThisJob = new RegExp(`\\[ensemble(?:-batch)?\\]\\s+(?:#\\d+\\s+)?${labelPattern}\\s+\\|`, "i");
+
+  const update = (patch: Partial<QueueItem>, subtaskId?: string, subtaskPatch?: Partial<QueueSubtask>): void => {
+    const subtasks = subtaskId
+      ? current.subtasks.map((s) => s.id === subtaskId ? { ...s, ...subtaskPatch } : s)
+      : current.subtasks;
+    current = { ...current, ...patch, subtasks, updated_at: new Date().toISOString() };
+    onUpdate(current);
+  };
+
+  return (line: string): void => {
+    // Only handle log lines that belong to this job
+    if (!forThisJob.test(line)) return;
+
+    // job start — mark all scorer subtasks running
+    if (/\|\s*start\b/i.test(line)) {
+      const now = new Date().toISOString();
+      update({ status: "running" as QueueTaskStatus }, undefined, undefined);
+      current = {
+        ...current,
+        status: "running" as QueueTaskStatus,
+        subtasks: current.subtasks.map((s) =>
+          s.id.startsWith("scorer:") || s.id === "model:claude"
+            ? { ...s, status: "running" as QueueTaskStatus, started_at: now }
+            : s,
+        ),
+        updated_at: now,
+      };
+      onUpdate(current);
+      return;
+    }
+
+    // scorer done
+    const scorerDone = line.match(/\|\s*scorer\s+([\w\-./]+)\s*\|\s*avg=/i);
+    if (scorerDone) {
+      const id = scorerSubtaskId(scorerDone[1]);
+      if (id) update({}, id, { status: "done", finished_at: new Date().toISOString() });
+      return;
+    }
+    // scorer error
+    const scorerErr = line.match(/\|\s*scorer\s+([\w\-./]+)\s*\|\s*error[:\s]/i);
+    if (scorerErr) {
+      const id = scorerSubtaskId(scorerErr[1]);
+      if (id) update({}, id, { status: "error", finished_at: new Date().toISOString() });
+      return;
+    }
+    // synthesizing
+    if (/\|\s*synthesizing/i.test(line)) {
+      update({}, "synthesis", { status: "running", started_at: new Date().toISOString() });
+      return;
+    }
+    // synthesis done
+    if (/\|\s*synthesis done/i.test(line)) {
+      update({}, "synthesis", { status: "done", finished_at: new Date().toISOString() });
+      return;
+    }
+  };
+}
+
+// Aggregates multiple per-job handlers into one onLine callback
+function makeBatchLogLineHandler(handlers: Array<(line: string) => void>): (line: string) => void {
+  return (line: string): void => { for (const h of handlers) h(line); };
 }
 
 export function generateRunId(): string {
@@ -452,5 +770,21 @@ export async function markOrphanedRunsFailed(): Promise<void> {
       }),
     );
   } catch { /* match-runs dir may not exist yet */ }
+
+  // Also reset any queue items stuck in running/todo/retrying state — they belong
+  // to processes that died with the previous server instance.
+  try {
+    const items = await readQueue();
+    const orphaned = items.filter((i) => i.status === "running" || i.status === "todo");
+    await Promise.all(orphaned.map((i) => upsertQueueItem({
+      ...i,
+      status: "permanent_error",
+      error: "orphaned: server restarted",
+      subtasks: i.subtasks.map((s) =>
+        s.status === "running" || s.status === "todo" ? { ...s, status: "error" as QueueTaskStatus, error: "orphaned" } : s,
+      ),
+      updated_at: new Date().toISOString(),
+    })));
+  } catch { /* queue file may not exist yet */ }
 }
 

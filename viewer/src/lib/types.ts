@@ -1,3 +1,31 @@
+export type QueueTaskStatus = "todo" | "running" | "retrying" | "done" | "error" | "permanent_error";
+
+export type QueueSubtask = {
+  id: string;
+  label: string;
+  status: QueueTaskStatus;
+  error?: string;
+  started_at?: string;
+  finished_at?: string;
+};
+
+export type QueueItem = {
+  id: string;
+  job_key: string;
+  title: string;
+  company: string;
+  mode: string;
+  status: QueueTaskStatus;
+  subtasks: QueueSubtask[];
+  attempt: number;
+  max_attempts: number;
+  next_retry_at?: string;
+  created_at: string;
+  updated_at: string;
+  error?: string;
+  score?: number;
+};
+
 export type JobRow = {
   provider: string;
   source_key: string;
@@ -113,4 +141,6 @@ export type RunCommandOptions = {
   logFile?: string;
   logStdout?: boolean;
   logStderr?: boolean;
+  onLine?: (line: string) => void;
+  onSpawn?: (child: import("node:child_process").ChildProcess) => void;
 };
