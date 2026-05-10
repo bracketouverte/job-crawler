@@ -4,6 +4,14 @@ import { DB_PATH } from "./config.js";
 
 export const db = new Database(DB_PATH, { fileMustExist: true });
 db.pragma("busy_timeout = 30000");
+db.pragma("journal_mode = WAL");
+
+// Add analysis_score column if it doesn't exist yet (idempotent)
+try {
+  db.exec(`ALTER TABLE catalog_jobs ADD COLUMN analysis_score REAL DEFAULT NULL`);
+} catch {
+  // column already exists
+}
 
 export const selectJobStatement = db.prepare(
   `SELECT provider, source_key, job_id, title, location, employment_type,
@@ -24,6 +32,17 @@ export const updateParsedMetadataStatement = db.prepare(
        ELSE compensation
      END
    WHERE provider = @provider AND source_key = @source_key AND job_id = @job_id`,
+);
+
+export const updateAnalysisScoreStatement = db.prepare(
+  `UPDATE catalog_jobs SET analysis_score = @score
+   WHERE provider = @provider AND source_key = @source_key AND job_id = @job_id`,
+);
+
+export const backfillAnalysisScoresStatement = db.prepare(
+  `UPDATE catalog_jobs SET analysis_score = @score
+   WHERE provider = @provider AND source_key = @source_key AND job_id = @job_id
+     AND (analysis_score IS NULL OR analysis_score = 0)`,
 );
 
 export const selectJobUrlStatement = db.prepare(

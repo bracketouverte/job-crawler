@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { AnalysisCache, CachedJobAnalysis, SinglePipelineResult } from "./types.js";
 import { ANALYSIS_CACHE_PATH } from "./config.js";
-import { db } from "./db.js";
+import { db, updateAnalysisScoreStatement } from "./db.js";
 
 // ---------------------------------------------------------------------------
 // Schema bootstrap — runs synchronously at module load, idempotent
@@ -165,6 +165,52 @@ export async function getAnalysisCache(): Promise<AnalysisCache> {
 }
 
 // ---------------------------------------------------------------------------
+// Sync analysis_score to catalog_jobs after each upsert
+// ---------------------------------------------------------------------------
+
+function parseJobKey(jobKey: string): { provider: string; source_key: string; job_id: string } | null {
+  const parts = jobKey.split("|");
+  if (parts.length < 3) return null;
+  const [provider, source_key, ...rest] = parts;
+  return { provider: provider!, source_key: source_key!, job_id: rest.join("|") };
+}
+
+function writeScoreToJobRow(jobKey: string, analysis: unknown): void {
+  const score = analysisScore5(analysis);
+  if (score === null) return;
+  const key = parseJobKey(jobKey);
+  if (!key) return;
+  try {
+    updateAnalysisScoreStatement.run({ score, ...key });
+  } catch {
+    // catalog_jobs row may not exist (e.g. test data)
+  }
+}
+
+// Backfill analysis_score for existing job_analyses rows that don't yet have a score in catalog_jobs
+{
+  const rows = db.prepare(
+    `SELECT ja.job_key, ja.analysis
+     FROM job_analyses ja
+     JOIN catalog_jobs cj ON cj.provider || '|' || cj.source_key || '|' || cj.job_id = ja.job_key
+     WHERE cj.analysis_score IS NULL
+       AND ja.pipeline IN ('claude-ensemble', 'ensemble', 'claude', 'legacy', 'maverick')
+     GROUP BY ja.job_key`,
+  ).all() as { job_key: string; analysis: string }[];
+
+  if (rows.length > 0) {
+    db.transaction(() => {
+      for (const row of rows) {
+        let analysis: unknown;
+        try { analysis = JSON.parse(row.analysis); } catch { continue; }
+        writeScoreToJobRow(row.job_key, analysis);
+      }
+    })();
+    console.log(`[analysis] backfilled analysis_score for ${rows.length} jobs`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Persist a single pipeline result — O(1) upsert
 // ---------------------------------------------------------------------------
 
@@ -180,6 +226,7 @@ export function persistPipelineEntry(
     analyzed_at: entry.analyzed_at,
     run_id: entry.run_id,
   });
+  writeScoreToJobRow(jobKey, entry.analysis);
   invalidateAnalysisCache();
 }
 
@@ -208,6 +255,7 @@ export async function persistRunResults(
         analyzed_at: analyzedAt,
         run_id: runId,
       });
+      writeScoreToJobRow(key, row.analysis);
       notificationTasks.push(notifyFn(row, runId));
     }
   })();

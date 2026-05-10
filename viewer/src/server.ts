@@ -62,66 +62,37 @@ app.get("/api/jobs", async (req, res) => {
 
   const analysisCache = await getAnalysisCache();
   const evaluatedOnly = evaluated === "1";
-  const evaluatedKeySet = evaluatedOnly
-    ? new Set(
-        Object.entries(analysisCache)
-          .filter(([, cached]) => {
-            const analysis = bestAnalysis(cached);
-            if (!analysis || typeof analysis !== "object") return false;
-            const score = parseFloat(String((analysis as { score_5?: unknown }).score_5 ?? ""));
-            return Number.isFinite(score) && score > 0;
-          })
-          .map(([key]) => key),
-      )
-    : null;
 
   const favList = favCompanies ? favCompanies.split(",").map((s) => s.trim()).filter(Boolean) : null;
 
   const { conditions, params } = addJobFilterConditions({ title, location, company, sources, days, favCompanies: favList });
 
+  if (evaluatedOnly) {
+    conditions.push("analysis_score IS NOT NULL AND analysis_score > 0");
+  }
+
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   try {
-    if (evaluatedOnly) {
-      // Post-SQL filter: fetch all matching rows, filter by analysis score, paginate in memory
-      const allRows = db
-        .prepare(
-          `SELECT provider, source_key, job_id, title, location, employment_type,
-                  compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
-           FROM catalog_jobs ${where}
-           ORDER BY COALESCE(posted_at, first_seen_at) DESC`,
-        )
-        .all(...params) as JobRow[];
+    const total = (
+      db.prepare(`SELECT COUNT(*) as n FROM catalog_jobs ${where}`).get(...params) as { n: number }
+    ).n;
 
-      const filtered = allRows.filter((job) => evaluatedKeySet!.has(jobCacheKey(job)));
-      const total = filtered.length;
-      const page = filtered.slice(offset, offset + pageSize);
-      const enrichedJobs = page.map((job) => {
-        const cached = analysisCache[jobCacheKey(job)];
-        return { ...sanitizeJob(job), analysis: bestAnalysis(cached), pipelines: cached?.pipelines ?? {} };
-      });
-      res.json({ total, page: pageNum, pageSize, jobs: enrichedJobs });
-    } else {
-      const total = (
-        db.prepare(`SELECT COUNT(*) as n FROM catalog_jobs ${where}`).get(...params) as { n: number }
-      ).n;
+    const jobs = db
+      .prepare(
+        `SELECT provider, source_key, job_id, title, location, employment_type,
+                compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+         FROM catalog_jobs ${where}
+         ORDER BY COALESCE(posted_at, first_seen_at) DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(...params, pageSize, offset) as JobRow[];
 
-      const jobs = db
-        .prepare(
-          `SELECT provider, source_key, job_id, title, location, employment_type,
-                  compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
-           FROM catalog_jobs ${where}
-           ORDER BY COALESCE(posted_at, first_seen_at) DESC
-           LIMIT ? OFFSET ?`,
-        )
-        .all(...params, pageSize, offset) as JobRow[];
-
-      const enrichedJobs = jobs.map((job) => {
-        const cached = analysisCache[jobCacheKey(job)];
-        return { ...sanitizeJob(job), analysis: bestAnalysis(cached), pipelines: cached?.pipelines ?? {} };
-      });
-      res.json({ total, page: pageNum, pageSize, jobs: enrichedJobs });
-    }
+    const enrichedJobs = jobs.map((job) => {
+      const cached = analysisCache[jobCacheKey(job)];
+      return { ...sanitizeJob(job), analysis: bestAnalysis(cached), pipelines: cached?.pipelines ?? {} };
+    });
+    res.json({ total, page: pageNum, pageSize, jobs: enrichedJobs });
   } catch (err) {
     console.error("/api/jobs error:", err);
     res.status(500).json({ error: String(err) });
