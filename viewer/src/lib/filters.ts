@@ -39,6 +39,7 @@ export function addJobFilterConditions(
     company?: string | number | null;
     sources?: string | string[] | null;
     days?: string | number | null;
+    favCompanies?: string[] | null;
   },
 ): { conditions: string[]; params: unknown[] } {
   const conditions: string[] = [];
@@ -99,6 +100,14 @@ export function addJobFilterConditions(
       params.push(`-${n} days`);
     }
   }
+
+  if (filters.favCompanies && filters.favCompanies.length > 0) {
+    const favClauses = filters.favCompanies.map(() => "LOWER(source_key) = ?");
+    conditions.push(`(${favClauses.join(" OR ")})`);
+    for (const fc of filters.favCompanies) params.push(fc.toLowerCase());
+  }
+
+  // evaluatedKeys filtering is handled post-SQL in the server to avoid SQLite param limits
 
   return { conditions, params };
 }

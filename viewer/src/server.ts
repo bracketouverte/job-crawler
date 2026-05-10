@@ -54,42 +54,74 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(join(__dirname, "../public")));
 
 app.get("/api/jobs", async (req, res) => {
-  const { title, location, days, company, sources, page, limit } = req.query as Record<string, string>;
+  const { title, location, days, company, sources, page, limit, favCompanies, evaluated } = req.query as Record<string, string>;
 
   const pageNum = Math.max(1, parseInt(page ?? "1", 10));
   const pageSize = Math.min(500, Math.max(1, parseInt(limit ?? "50", 10)));
   const offset = (pageNum - 1) * pageSize;
 
-  const { conditions, params } = addJobFilterConditions({ title, location, company, sources, days });
+  const analysisCache = await getAnalysisCache();
+  const evaluatedOnly = evaluated === "1";
+  const evaluatedKeySet = evaluatedOnly
+    ? new Set(
+        Object.entries(analysisCache)
+          .filter(([, cached]) => {
+            const analysis = bestAnalysis(cached);
+            if (!analysis || typeof analysis !== "object") return false;
+            const score = parseFloat(String((analysis as { score_5?: unknown }).score_5 ?? ""));
+            return Number.isFinite(score) && score > 0;
+          })
+          .map(([key]) => key),
+      )
+    : null;
+
+  const favList = favCompanies ? favCompanies.split(",").map((s) => s.trim()).filter(Boolean) : null;
+
+  const { conditions, params } = addJobFilterConditions({ title, location, company, sources, days, favCompanies: favList });
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   try {
-    const analysisCache = await getAnalysisCache();
-    const total = (
-      db.prepare(`SELECT COUNT(*) as n FROM catalog_jobs ${where}`).get(...params) as { n: number }
-    ).n;
+    if (evaluatedOnly) {
+      // Post-SQL filter: fetch all matching rows, filter by analysis score, paginate in memory
+      const allRows = db
+        .prepare(
+          `SELECT provider, source_key, job_id, title, location, employment_type,
+                  compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+           FROM catalog_jobs ${where}
+           ORDER BY COALESCE(posted_at, first_seen_at) DESC`,
+        )
+        .all(...params) as JobRow[];
 
-    const jobs = db
-      .prepare(
-        `SELECT provider, source_key, job_id, title, location, employment_type,
-                compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
-         FROM catalog_jobs ${where}
-         ORDER BY COALESCE(posted_at, first_seen_at) DESC
-         LIMIT ? OFFSET ?`,
-      )
-      .all(...params, pageSize, offset) as JobRow[];
+      const filtered = allRows.filter((job) => evaluatedKeySet!.has(jobCacheKey(job)));
+      const total = filtered.length;
+      const page = filtered.slice(offset, offset + pageSize);
+      const enrichedJobs = page.map((job) => {
+        const cached = analysisCache[jobCacheKey(job)];
+        return { ...sanitizeJob(job), analysis: bestAnalysis(cached), pipelines: cached?.pipelines ?? {} };
+      });
+      res.json({ total, page: pageNum, pageSize, jobs: enrichedJobs });
+    } else {
+      const total = (
+        db.prepare(`SELECT COUNT(*) as n FROM catalog_jobs ${where}`).get(...params) as { n: number }
+      ).n;
 
-    const enrichedJobs = jobs.map((job) => {
-      const cached = analysisCache[jobCacheKey(job)];
-      return {
-        ...sanitizeJob(job),
-        analysis: bestAnalysis(cached),
-        pipelines: cached?.pipelines ?? {},
-      };
-    });
+      const jobs = db
+        .prepare(
+          `SELECT provider, source_key, job_id, title, location, employment_type,
+                  compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+           FROM catalog_jobs ${where}
+           ORDER BY COALESCE(posted_at, first_seen_at) DESC
+           LIMIT ? OFFSET ?`,
+        )
+        .all(...params, pageSize, offset) as JobRow[];
 
-    res.json({ total, page: pageNum, pageSize, jobs: enrichedJobs });
+      const enrichedJobs = jobs.map((job) => {
+        const cached = analysisCache[jobCacheKey(job)];
+        return { ...sanitizeJob(job), analysis: bestAnalysis(cached), pipelines: cached?.pipelines ?? {} };
+      });
+      res.json({ total, page: pageNum, pageSize, jobs: enrichedJobs });
+    }
   } catch (err) {
     console.error("/api/jobs error:", err);
     res.status(500).json({ error: String(err) });

@@ -1363,19 +1363,17 @@
   ['filter-title','filter-location','filter-company','filter-days'].forEach(id => {
     document.getElementById(id).addEventListener('input', onFilterChange);
   });
-  document.getElementById('fav-only-toggle').addEventListener('change', renderCurrentView);
-  document.getElementById('evaluated-only-toggle').addEventListener('change', renderCurrentView);
+  function refetchFromToggle() {
+    if (fetchJobsController) fetchJobsController.abort();
+    fetchJobsController = new AbortController();
+    fetchJobs(1, fetchJobsController.signal);
+  }
+  document.getElementById('fav-only-toggle').addEventListener('change', refetchFromToggle);
+  document.getElementById('evaluated-only-toggle').addEventListener('change', refetchFromToggle);
 
   /* ── Render current view ─────────────────────────────────────── */
   function getRenderableJobs() {
-    const favOnly       = document.getElementById('fav-only-toggle').checked;
-    const evaluatedOnly = document.getElementById('evaluated-only-toggle').checked;
-    return allJobs.filter(job => {
-      if (favOnly && !isFav(companyName(job))) return false;
-      if (evaluatedOnly && !(job.analysis && Number(job.analysis.score_5) > 0)) return false;
-      if (hiddenJobs.has(jobKey(job))) return false;
-      return true;
-    });
+    return allJobs.filter(job => !hiddenJobs.has(jobKey(job)));
   }
 
   function renderCurrentView() {
@@ -1388,11 +1386,12 @@
     const favOnly       = document.getElementById('fav-only-toggle').checked;
     const evaluatedOnly = document.getElementById('evaluated-only-toggle').checked;
     const countEl       = document.getElementById('result-count');
+    const displayCount  = totalJobs > 0 ? totalJobs : jobs.length;
     countEl.textContent = evaluatedOnly
-      ? `${jobs.length.toLocaleString()} evaluated job${jobs.length !== 1 ? 's' : ''}`
+      ? `${displayCount.toLocaleString()} evaluated job${displayCount !== 1 ? 's' : ''}`
       : favOnly
-        ? `${jobs.length.toLocaleString()} favorite job${jobs.length !== 1 ? 's' : ''}`
-        : `${jobs.length.toLocaleString()} job${jobs.length !== 1 ? 's' : ''}`;
+        ? `${displayCount.toLocaleString()} favorite job${displayCount !== 1 ? 's' : ''}`
+        : `${displayCount.toLocaleString()} job${displayCount !== 1 ? 's' : ''}`;
 
     if (jobs.length === 0) {
       list.style.display = 'none';
@@ -1422,6 +1421,17 @@
     if (company)        p.set('company', company);
     if (days)           p.set('days', days);
     if (sources.length) p.set('sources', sources.join(','));
+    if (overrides.favCompanies === undefined) {
+      const favOnly = document.getElementById('fav-only-toggle').checked;
+      if (favOnly && favoriteCompanies.size > 0) {
+        p.set('favCompanies', [...favoriteCompanies.keys()].join(','));
+      } else if (favOnly) {
+        p.set('favCompanies', '__none__');
+      }
+    }
+    if (overrides.evaluated === undefined) {
+      if (document.getElementById('evaluated-only-toggle').checked) p.set('evaluated', '1');
+    }
     return p;
   }
 
