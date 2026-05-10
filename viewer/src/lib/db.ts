@@ -13,6 +13,45 @@ try {
   // column already exists
 }
 
+// FTS5 virtual table for fast title + location search
+db.exec(`
+  CREATE VIRTUAL TABLE IF NOT EXISTS catalog_jobs_fts USING fts5(
+    title,
+    location,
+    content='catalog_jobs',
+    content_rowid='rowid',
+    tokenize='unicode61 remove_diacritics 1'
+  );
+`);
+
+// Populate FTS index if empty (first boot or after manual rebuild)
+{
+  const ftsCount = (db.prepare("SELECT COUNT(*) as n FROM catalog_jobs_fts").get() as { n: number }).n;
+  if (ftsCount === 0) {
+    db.exec(`INSERT INTO catalog_jobs_fts(rowid, title, location) SELECT rowid, title, location FROM catalog_jobs`);
+    console.log("[db] FTS5 index populated");
+  }
+}
+
+// Triggers to keep FTS index in sync with catalog_jobs
+db.exec(`
+  CREATE TRIGGER IF NOT EXISTS catalog_jobs_fts_ai
+  AFTER INSERT ON catalog_jobs BEGIN
+    INSERT INTO catalog_jobs_fts(rowid, title, location) VALUES (new.rowid, new.title, new.location);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS catalog_jobs_fts_ad
+  AFTER DELETE ON catalog_jobs BEGIN
+    INSERT INTO catalog_jobs_fts(catalog_jobs_fts, rowid, title, location) VALUES ('delete', old.rowid, old.title, old.location);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS catalog_jobs_fts_au
+  AFTER UPDATE ON catalog_jobs BEGIN
+    INSERT INTO catalog_jobs_fts(catalog_jobs_fts, rowid, title, location) VALUES ('delete', old.rowid, old.title, old.location);
+    INSERT INTO catalog_jobs_fts(rowid, title, location) VALUES (new.rowid, new.title, new.location);
+  END;
+`);
+
 export const selectJobStatement = db.prepare(
   `SELECT provider, source_key, job_id, title, location, employment_type,
           compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at

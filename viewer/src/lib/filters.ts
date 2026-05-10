@@ -32,6 +32,17 @@ export function parseTitleQuery(input: string): TitleTokenGroup[] {
   return tokens;
 }
 
+// Escape a term for FTS5 query syntax (wrap in double quotes to treat as a phrase).
+function ftsEscape(term: string): string {
+  return `"${term.replace(/"/g, '""')}"`;
+}
+
+// Returns true when all token groups are simple single-term non-negated ANDs —
+// the easy case that maps directly to FTS5 AND queries.
+function isSimpleFtsQuery(tokens: TitleTokenGroup[]): boolean {
+  return tokens.length > 0 && tokens.every((t) => t.terms.length === 1 && !t.exclude);
+}
+
 export function addJobFilterConditions(
   filters: {
     title?: string | number | null;
@@ -52,19 +63,30 @@ export function addJobFilterConditions(
 
   if (title.trim()) {
     const tokens = parseTitleQuery(title);
-    for (const token of tokens) {
-      if (token.terms.length === 1) {
-        conditions.push(token.exclude ? "LOWER(title) NOT LIKE ?" : "LOWER(title) LIKE ?");
-        params.push(`%${token.terms[0]}%`);
-      } else {
-        if (token.exclude) {
-          const notClauses = token.terms.map(() => "LOWER(title) NOT LIKE ?");
-          conditions.push(`(${notClauses.join(" AND ")})`);
-          for (const t of token.terms) params.push(`%${t}%`);
+
+    if (isSimpleFtsQuery(tokens)) {
+      // FTS5 path: all plain AND terms — emit a single rowid IN (SELECT rowid FROM fts WHERE title MATCH ?)
+      const ftsQuery = tokens.map((t) => ftsEscape(t.terms[0]!)).join(" ");
+      conditions.push(
+        `rowid IN (SELECT rowid FROM catalog_jobs_fts WHERE catalog_jobs_fts MATCH ?)`,
+      );
+      params.push(`title:${ftsQuery}`);
+    } else {
+      // Fallback: complex query (negation / OR groups) — use LIKE as before
+      for (const token of tokens) {
+        if (token.terms.length === 1) {
+          conditions.push(token.exclude ? "LOWER(title) NOT LIKE ?" : "LOWER(title) LIKE ?");
+          params.push(`%${token.terms[0]}%`);
         } else {
-          const orClauses = token.terms.map(() => "LOWER(title) LIKE ?");
-          conditions.push(`(${orClauses.join(" OR ")})`);
-          for (const t of token.terms) params.push(`%${t}%`);
+          if (token.exclude) {
+            const notClauses = token.terms.map(() => "LOWER(title) NOT LIKE ?");
+            conditions.push(`(${notClauses.join(" AND ")})`);
+            for (const t of token.terms) params.push(`%${t}%`);
+          } else {
+            const orClauses = token.terms.map(() => "LOWER(title) LIKE ?");
+            conditions.push(`(${orClauses.join(" OR ")})`);
+            for (const t of token.terms) params.push(`%${t}%`);
+          }
         }
       }
     }
@@ -72,9 +94,18 @@ export function addJobFilterConditions(
 
   if (location.trim()) {
     const locs = location.split(/[,]+/).map((l) => l.trim()).filter(Boolean);
-    const locClauses = locs.map(() => "LOWER(location) LIKE ?");
-    conditions.push(`(${locClauses.join(" OR ")})`);
-    for (const loc of locs) params.push(`%${loc.toLowerCase()}%`);
+    if (locs.length === 1) {
+      // Single location term: use FTS5 on the location column
+      conditions.push(
+        `rowid IN (SELECT rowid FROM catalog_jobs_fts WHERE catalog_jobs_fts MATCH ?)`,
+      );
+      params.push(`location:${ftsEscape(locs[0]!)}`);
+    } else {
+      // Multiple location terms: fall back to LIKE OR
+      const locClauses = locs.map(() => "LOWER(location) LIKE ?");
+      conditions.push(`(${locClauses.join(" OR ")})`);
+      for (const loc of locs) params.push(`%${loc.toLowerCase()}%`);
+    }
   }
 
   if (company.trim()) {
@@ -107,7 +138,7 @@ export function addJobFilterConditions(
     for (const fc of filters.favCompanies) params.push(fc.toLowerCase());
   }
 
-  // evaluatedKeys filtering is handled post-SQL in the server to avoid SQLite param limits
+  // evaluatedKeys filtering is handled via the analysis_score column in server.ts
 
   return { conditions, params };
 }
