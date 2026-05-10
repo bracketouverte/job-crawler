@@ -461,104 +461,138 @@ def ensemble_analyze(jd_text, profile_text, job_label, profile_data=None, cache_
     return synthesis, match_context
 
 
-def process_batch(input_file, output_file, profile_text, profile_data=None, pipeline_tag="ensemble"):
-    results = []
-    total = succeeded = failed = 0
+MAX_JOB_CONCURRENCY = int(os.environ.get("ENSEMBLE_JOB_CONCURRENCY", "1"))
 
-    # Cache dir lives next to the input file; survives retries, cleaned up on job success
+
+def _process_one_job(idx, line, profile_text, profile_data, pipeline_tag, cache_dir):
+    """Analyze a single job line. Returns (idx, row_dict, status)."""
+    i = idx + 1
+    try:
+        job = json.loads(line)
+    except Exception:
+        log(f"[ensemble-batch] line {i} | invalid json")
+        return idx, None, "invalid"
+
+    provider = job.get("provider", "?")
+    source_key = job.get("source_key", "?")
+    job_id = job.get("job_id", "?")
+    title = job.get("title", "?")
+    job_label = f"#{i} {source_key} | {title}"
+    jd_text = job.get("jd_text", "").strip()
+    jd_parse_error = job.get("parse_error") or None
+
+    if not jd_text:
+        log(f"[ensemble-batch] {job_label} | empty jd_text")
+        return idx, None, "empty"
+
+    log(f"[ensemble-batch] {job_label} | start | jd_chars={len(jd_text)}")
+    t0 = time.time()
+    try:
+        synthesis, match_context = ensemble_analyze(
+            jd_text, profile_text, job_label, profile_data=profile_data,
+            cache_dir=cache_dir, job_id=job_id,
+        )
+        scorecard = synthesis.get("scorecard", {})
+        score_100 = score_to_100(scorecard)
+        score_5 = round(1.0 + (4.0 * score_100 / 100.0), 1)
+        blockers = synthesis.get("blockers", [])
+        verdict = synthesis.get("verdict", "yes")
+        recommendation = infer_recommendation(score_5)
+
+        analysis = {
+            "score": score_100,
+            "score_5": score_5,
+            "verdict": verdict,
+            "application_recommendation": recommendation,
+            "archetype": synthesis.get("archetype", {}),
+            "role_summary": synthesis.get("role_summary", {}),
+            "scorecard": scorecard,
+            "tool_match": synthesis.get("tool_match", []),
+            "forces": synthesis.get("forces", []),
+            "faiblesses": synthesis.get("faiblesses", []),
+            "gaps": [{"gap": f, "severity": "medium", "blocker": False, "mitigation": ""} for f in synthesis.get("faiblesses", [])],
+            "blockers": blockers,
+            "standout_differentiator": synthesis.get("remarques", ""),
+            "remarques": synthesis.get("remarques", ""),
+            "pipeline": pipeline_tag,
+            **({"jd_parse_error": jd_parse_error} if jd_parse_error else {}),
+        }
+        analysis = apply_match_guardrails(analysis, match_context)
+        score_100 = analysis["score"]
+        verdict = analysis["verdict"]
+        row = {
+            "provider": provider,
+            "source_key": source_key,
+            "job_id": job_id,
+            "title": title,
+            "status": "ok",
+            "elapsed": round(time.time() - t0, 1),
+            "analysis": analysis,
+            **({"jd_parse_error": jd_parse_error} if jd_parse_error else {}),
+        }
+        log(f"[ensemble-batch] {job_label} | done | score={score_100} verdict={verdict} elapsed={row['elapsed']}s")
+        # Clean up scorer cache now that the job succeeded
+        for m in SCORERS:
+            try: _scorer_cache_path(cache_dir, job_id, m).unlink(missing_ok=True)
+            except Exception: pass
+        try: _scorer_cache_path(cache_dir, job_id, f"{SYNTHESIZER}__synthesis").unlink(missing_ok=True)
+        except Exception: pass
+        return idx, row, "ok"
+    except Exception as e:
+        log(f"[ensemble-batch] {job_label} | error: {e}")
+        row = {
+            "provider": provider, "source_key": source_key, "job_id": job_id,
+            "title": title, "status": "error", "score": 0, "verdict": "no",
+            "error": str(e)[:300],
+        }
+        return idx, row, "error"
+
+
+def process_batch(input_file, output_file, profile_text, profile_data=None, pipeline_tag="ensemble"):
+    # Cache dir lives next to the input file; survives retries, cleaned up per-job on success
     cache_dir = Path(input_file).parent / ".scorer_cache"
 
     with open(input_file, encoding="utf-8") as f:
         lines = [l.strip() for l in f if l.strip()]
 
     total = len(lines)
-    log(f"[ensemble-batch] start | jobs={total}")
+    concurrency = max(1, min(MAX_JOB_CONCURRENCY, total))
+    log(f"[ensemble-batch] start | jobs={total} concurrency={concurrency}")
+
+    # Use a fixed-size result list to preserve JSONL output order regardless
+    # of which job finishes first when concurrency > 1.
+    ordered_rows = [None] * total
+    succeeded = failed = 0
+
+    if concurrency == 1:
+        # Single-job path: avoids ThreadPoolExecutor overhead for the common case
+        for idx, line in enumerate(lines):
+            _, row, status = _process_one_job(
+                idx, line, profile_text, profile_data, pipeline_tag, cache_dir
+            )
+            ordered_rows[idx] = row
+            if status == "ok":
+                succeeded += 1
+            else:
+                failed += 1
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = {
+                pool.submit(_process_one_job, idx, line, profile_text, profile_data, pipeline_tag, cache_dir): idx
+                for idx, line in enumerate(lines)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                idx, row, status = future.result()
+                ordered_rows[idx] = row
+                if status == "ok":
+                    succeeded += 1
+                else:
+                    failed += 1
 
     with open(output_file, "w", encoding="utf-8") as out:
-        for i, line in enumerate(lines, 1):
-            try:
-                job = json.loads(line)
-            except Exception:
-                log(f"[ensemble-batch] line {i} | invalid json")
-                failed += 1
-                continue
-
-            provider = job.get("provider", "?")
-            source_key = job.get("source_key", "?")
-            job_id = job.get("job_id", "?")
-            title = job.get("title", "?")
-            job_label = f"#{i} {source_key} | {title}"
-            jd_text = job.get("jd_text", "").strip()
-            jd_parse_error = job.get("parse_error") or None
-
-            if not jd_text:
-                log(f"[ensemble-batch] {job_label} | empty jd_text")
-                failed += 1
-                continue
-
-            log(f"[ensemble-batch] {job_label} | start | jd_chars={len(jd_text)}")
-            t0 = time.time()
-            try:
-                synthesis, match_context = ensemble_analyze(
-                    jd_text, profile_text, job_label, profile_data=profile_data,
-                    cache_dir=cache_dir, job_id=job_id,
-                )
-                scorecard = synthesis.get("scorecard", {})
-                score_100 = score_to_100(scorecard)
-                score_5 = round(1.0 + (4.0 * score_100 / 100.0), 1)
-                blockers = synthesis.get("blockers", [])
-                verdict = synthesis.get("verdict", "yes")
-                recommendation = infer_recommendation(score_5)
-
-                analysis = {
-                    "score": score_100,
-                    "score_5": score_5,
-                    "verdict": verdict,
-                    "application_recommendation": recommendation,
-                    "archetype": synthesis.get("archetype", {}),
-                    "role_summary": synthesis.get("role_summary", {}),
-                    "scorecard": scorecard,
-                    "tool_match": synthesis.get("tool_match", []),
-                    "forces": synthesis.get("forces", []),
-                    "faiblesses": synthesis.get("faiblesses", []),
-                    "gaps": [{"gap": f, "severity": "medium", "blocker": False, "mitigation": ""} for f in synthesis.get("faiblesses", [])],
-                    "blockers": blockers,
-                    "standout_differentiator": synthesis.get("remarques", ""),
-                    "remarques": synthesis.get("remarques", ""),
-                    "pipeline": pipeline_tag,
-                    **({"jd_parse_error": jd_parse_error} if jd_parse_error else {}),
-                }
-                analysis = apply_match_guardrails(analysis, match_context)
-                score_100 = analysis["score"]
-                verdict = analysis["verdict"]
-                row = {
-                    "provider": provider,
-                    "source_key": source_key,
-                    "job_id": job_id,
-                    "title": title,
-                    "status": "ok",
-                    "elapsed": round(time.time() - t0, 1),
-                    "analysis": analysis,
-                    **({"jd_parse_error": jd_parse_error} if jd_parse_error else {}),
-                }
+        for row in ordered_rows:
+            if row is not None:
                 out.write(json.dumps(row, ensure_ascii=False) + "\n")
-                succeeded += 1
-                log(f"[ensemble-batch] {job_label} | done | score={score_100} verdict={verdict} elapsed={row['elapsed']}s")
-                # Clean up scorer cache for this job now that it succeeded
-                for m in SCORERS:
-                    try: _scorer_cache_path(cache_dir, job_id, m).unlink(missing_ok=True)
-                    except Exception: pass
-                try: _scorer_cache_path(cache_dir, job_id, f"{SYNTHESIZER}__synthesis").unlink(missing_ok=True)
-                except Exception: pass
-            except Exception as e:
-                log(f"[ensemble-batch] {job_label} | error: {e}")
-                row = {
-                    "provider": provider, "source_key": source_key, "job_id": job_id,
-                    "title": title, "status": "error", "score": 0, "verdict": "no",
-                    "error": str(e)[:300],
-                }
-                out.write(json.dumps(row, ensure_ascii=False) + "\n")
-                failed += 1
 
     summary = {"total": total, "succeeded": succeeded, "failed": failed}
     log(f"[ensemble-batch] done | {summary}")
