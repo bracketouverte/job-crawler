@@ -160,10 +160,14 @@
   function locationLabel(job, mode) {
     const raw = String(job.location || '').trim();
     if (!raw) return '';
-    const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+    // Split on comma or em/en-dash separators
+    const parts = raw.split(/,|\s[–—-]\s/).map(s => s.trim()).filter(Boolean);
     if (parts.length === 0) return '';
     if (mode === 'Remote') {
-      return parts[parts.length - 1];
+      // If every part is just a work-mode keyword, the location adds nothing
+      const WORK_MODES = /^(remote|hybrid|on-?site|in.?office)$/i;
+      const geo = parts.filter(p => !WORK_MODES.test(p));
+      return geo.length > 0 ? geo[geo.length - 1] : '';
     }
     if (parts.length === 1) return parts[0];
     return `${parts[0]}, ${parts[parts.length - 1]}`;
@@ -228,9 +232,6 @@
 
     return `
       ${btn('claude-ensemble', 'js-analyze-claude-ens')}
-      <button class="btn btn-ghost js-jd-data" title="Extracted JD data">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> JD data
-      </button>
       <button class="btn btn-ghost js-hide">Not interested</button>`;
   }
 
@@ -239,7 +240,6 @@
       el.addEventListener('click', () => openPanel(job, el.dataset.pipeline));
     });
     footer.querySelector('.js-analyze-claude-ens')?.addEventListener('click', () => analyzeJob(job, null, 'claude-ensemble'));
-    footer.querySelector('.js-jd-data')?.addEventListener('click',            () => openJdModal(job));
     footer.querySelector('.js-hide')?.addEventListener('click',               () => hideJob(jobKey(job), job));
   }
 
@@ -331,7 +331,6 @@
       const salaryRange = extractSalaryRange(cleanCompensation);
       const jdMeta = [
         metaText(salaryRange || cleanCompensation, 34),
-        metaText(job.location, 40),
       ].filter(Boolean).join('<span class="dot"></span>');
 
       const card = document.createElement('article');
@@ -348,10 +347,18 @@
                 : `<span class="job-title">${esc(job.title ?? '—')}</span>`}
               ${(() => {
                 const locLabel = locationLabel(job, mode);
-                if (!locLabel) return '';
+                if (!locLabel && mode === 'Unknown') return '';
+                let modeText;
+                if (locLabel) {
+                  modeText = `${mode} · ${locLabel}`;
+                } else {
+                  // No geo suffix — use remote_policy if it's richer than the bare mode word
+                  const rp = String(anal?.role_summary?.remote_policy || '').trim();
+                  const rpLower = rp.toLowerCase();
+                  modeText = (rp && rpLower !== mode.toLowerCase() && !rpLower.match(/^(remote|hybrid|on-?site)$/i)) ? rp : mode;
+                }
                 return `<div class="job-loc-row">
-                  <span class="mode-pill" data-mode="${esc(mode)}"><span class="swatch"></span>${esc(mode)}</span>
-                  <span class="loc-pill">${esc(locLabel)}</span>
+                  <span class="mode-pill" data-mode="${esc(mode)}"><span class="swatch"></span>${esc(modeText)}</span>
                 </div>`;
               })()}
               <div class="job-meta-row">
@@ -658,16 +665,7 @@
       </section>
       <div class="panel-actions">
         <div class="panel-rerun-wrap">
-          <button class="btn btn-ghost" id="panel-reanalyze" data-mode="${esc(pipeline)}">Re-run · ${esc(PIPELINES[pipeline]?.label || pipeline)}</button>
-          <button class="panel-rerun-caret" id="panel-rerun-caret" title="Choose pipeline">▾</button>
-          <div class="panel-rerun-menu" id="panel-rerun-menu">
-            ${Object.entries(PIPELINES).map(([m, p]) => `
-              <button data-rerun-mode="${m}">
-                <span class="menu-swatch ${p.swatchClass}"></span>
-                <span>${esc(p.label)}</span>
-                <span style="margin-left:auto;opacity:0.5;font-size:10px;">${esc(p.dur)}</span>
-              </button>`).join('')}
-          </div>
+          <button class="btn panel-reanalyze-btn panel-reanalyze--${esc(pipeline)}" id="panel-reanalyze" data-mode="${esc(pipeline)}">Re-run · ${esc(PIPELINES[pipeline]?.label || pipeline)}</button>
         </div>
         ${job.job_url ? `<a href="${esc(job.job_url)}" target="_blank" rel="noopener" class="btn btn-primary">Apply ↗</a>` : ''}
       </div>
@@ -681,6 +679,12 @@
         ${toolMatchHtml}
         ${gapsEnhancedHtml}
         ${standoutHtml}
+        <section class="panel-section panel-jd-section" id="panel-jd-section">
+          <div class="panel-section-label panel-jd-toggle" id="panel-jd-toggle" style="cursor:pointer;user-select:none;">
+            JD data <span id="panel-jd-caret" style="opacity:0.5;">▸</span>
+          </div>
+          <div id="panel-jd-body" style="display:none;"></div>
+        </section>
       </div>
     `;
 
@@ -728,6 +732,41 @@
     // Paste JD button
     document.getElementById('panel-paste-jd')?.addEventListener('click', () => {
       openPasteJdModal(job, pipeline);
+    });
+
+    // JD data section — toggle + lazy load
+    const jdToggle = document.getElementById('panel-jd-toggle');
+    const jdBody   = document.getElementById('panel-jd-body');
+    const jdCaret  = document.getElementById('panel-jd-caret');
+    let jdLoaded = false;
+
+    async function loadJdSection() {
+      if (jdLoaded) return;
+      jdLoaded = true;
+      jdBody.innerHTML = '<div class="jd-loading" style="font-size:12px;padding:6px 0;opacity:0.6;">Loading…</div>';
+      const params = new URLSearchParams({ provider: job.provider, source_key: job.source_key, job_id: job.job_id });
+      try {
+        const res  = await fetch(`/api/job-parsed?${params}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Request failed');
+        jdBody.innerHTML = renderJdData(data);
+      } catch (err) {
+        const notYet = err.message?.includes('Run analysis first');
+        jdBody.innerHTML = notYet
+          ? `<div style="font-size:12px;opacity:0.5;padding:4px 0;">Available after first analysis run.</div>`
+          : `<div class="jd-error" style="font-size:12px;">
+              Could not load JD data.
+              <button class="btn btn-ghost btn-xs jd-paste-analyze-btn" style="margin-left:6px;">Paste JD &amp; Analyze</button>
+             </div>`;
+        jdBody.querySelector('.jd-paste-analyze-btn')?.addEventListener('click', () => openPasteJdModal(job, 'claude-ensemble'));
+      }
+    }
+
+    jdToggle?.addEventListener('click', () => {
+      const open = jdBody.style.display !== 'none';
+      jdBody.style.display = open ? 'none' : 'block';
+      if (jdCaret) jdCaret.textContent = open ? '▸' : '▾';
+      if (!open) loadJdSection();
     });
   }
 
@@ -1590,15 +1629,7 @@
     renderCurrentView();
   });
 
-  /* ── JD data modal ───────────────────────────────────────────── */
-  const jdModal     = document.getElementById('jd-modal');
-  const jdModalBody = document.getElementById('jd-modal-body');
-  const jdModalTitle = document.getElementById('jd-modal-title');
-
-  function closeJdModal() { jdModal.style.display = 'none'; }
-  document.getElementById('jd-modal-close').addEventListener('click', closeJdModal);
-  jdModal.addEventListener('click', e => { if (e.target === jdModal) closeJdModal(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeJdModal(); });
+  /* ── JD data rendering (used in analysis panel) ─────────────── */
 
   // Extract salary numbers from compensation string (display only numbers with currency, no long text)
   function isRealCompensation(compensation) {
@@ -1671,21 +1702,6 @@
       list('Responsibilities', data.responsibilities),
       list('Requirements', data.requirements_summary),
     ].filter(Boolean).join('') || '<div class="jd-error">No structured data returned.</div>';
-  }
-
-  async function openJdModal(job) {
-    jdModal.style.display = 'flex';
-    jdModalTitle.textContent = `JD data — ${job.title || 'Job'}`;
-    jdModalBody.innerHTML = '<div class="jd-loading">Fetching extracted data…</div>';
-    const params = new URLSearchParams({ provider: job.provider, source_key: job.source_key, job_id: job.job_id });
-    try {
-      const res  = await fetch(`/api/job-parsed?${params}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Request failed');
-      jdModalBody.innerHTML = renderJdData(data);
-    } catch (err) {
-      jdModalBody.innerHTML = `<div class="jd-error">Error: ${esc(err.message || String(err))}</div>`;
-    }
   }
 
   /* ── Queue drawer ────────────────────────────────────────────── */

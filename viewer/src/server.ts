@@ -443,17 +443,14 @@ app.get("/api/job-parsed", async (req, res) => {
     res.status(404).json({ error: "Job not found" });
     return;
   }
-  if (!job.job_url) {
-    res.status(422).json({ error: "Job has no URL to parse" });
+  if (!job.parsed_jd) {
+    res.status(404).json({ error: "Not yet parsed — run analysis first" });
     return;
   }
   try {
-    const parsed = await parseJobPost(job.job_url);
-    persistParsedMetadata(job, parsed);
-    res.json(parsed);
-  } catch (err) {
-    console.error("/api/job-parsed error:", err);
-    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    res.json(JSON.parse(job.parsed_jd));
+  } catch {
+    res.status(500).json({ error: "Corrupted parse cache" });
   }
 });
 

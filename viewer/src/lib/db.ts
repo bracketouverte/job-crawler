@@ -13,6 +13,13 @@ try {
   // column already exists
 }
 
+// Add parsed_jd column if it doesn't exist yet (idempotent)
+try {
+  db.exec(`ALTER TABLE catalog_jobs ADD COLUMN parsed_jd TEXT DEFAULT NULL`);
+} catch {
+  // column already exists
+}
+
 // FTS5 virtual table for fast title + location search
 db.exec(`
   CREATE VIRTUAL TABLE IF NOT EXISTS catalog_jobs_fts USING fts5(
@@ -54,7 +61,7 @@ db.exec(`
 
 export const selectJobStatement = db.prepare(
   `SELECT provider, source_key, job_id, title, location, employment_type,
-          compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+          compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at, parsed_jd
    FROM catalog_jobs
    WHERE provider = ? AND source_key = ? AND job_id = ?`,
 );
@@ -69,6 +76,10 @@ export const updateParsedMetadataStatement = db.prepare(
      compensation = CASE
        WHEN @compensation IS NOT NULL AND TRIM(@compensation) <> '' THEN @compensation
        ELSE compensation
+     END,
+     parsed_jd = CASE
+       WHEN parsed_jd IS NULL AND @parsed_jd IS NOT NULL THEN @parsed_jd
+       ELSE parsed_jd
      END
    WHERE provider = @provider AND source_key = @source_key AND job_id = @job_id`,
 );

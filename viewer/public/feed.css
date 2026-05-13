@@ -750,6 +750,20 @@ body {
   display: inline-flex;
 }
 .panel-rerun-wrap .btn-ghost { border-radius: 6px 0 0 6px; border-right: none; }
+.panel-reanalyze-btn {
+  border-radius: 6px;
+  color: #fff;
+  font-weight: 500;
+  padding: 6px 14px;
+  font-size: 13px;
+  transition: filter .15s;
+}
+.panel-reanalyze-btn:hover { filter: brightness(1.1); }
+.panel-reanalyze--maverick       { background: #2563eb; border: 1px solid #1d4ed8; }
+.panel-reanalyze--ensemble       { background: #7c3aed; border: 1px solid #6d28d9; }
+.panel-reanalyze--claude-ensemble { background: #4338ca; border: 1px solid #3730a3; }
+.panel-reanalyze--codex          { background: #b45309; border: 1px solid #92400e; }
+.panel-reanalyze--codex-ens      { background: #7f1d1d; border: 1px solid #6b1a1a; }
 .panel-rerun-caret {
   border-radius: 0 6px 6px 0;
   border: 1px solid var(--border);

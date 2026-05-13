@@ -181,7 +181,8 @@ export function persistParsedMetadata(job: JobRow, parsed: ParsedJobPost): void 
   const location = cleanParsedText(parsed.location);
   const parsedCompensation = cleanParsedText(parsed.compensation);
   const compensation = isRealCompensation(parsedCompensation) ? parsedCompensation : null;
-  if (!location && !compensation) {
+  const hasData = Object.keys(parsed).length > 0;
+  if (!location && !compensation && !hasData) {
     return;
   }
 
@@ -192,6 +193,7 @@ export function persistParsedMetadata(job: JobRow, parsed: ParsedJobPost): void 
       job_id: job.job_id,
       location,
       compensation,
+      parsed_jd: hasData ? JSON.stringify(parsed) : null,
     });
   } catch (error) {
     console.error("persistParsedMetadata error:", error);
@@ -256,7 +258,13 @@ export async function writeBatchInput(runId: string, jobs: JobRow[], manifest: M
         const jobLabel = `${companyName(job)} | ${job.title ?? job.job_id}`;
         active++;
 
-        const task: Promise<void> = job.job_url
+        const cachedParsed = job.parsed_jd ? (() => { try { return JSON.parse(job.parsed_jd) as ParsedJobPost; } catch { return null; } })() : null;
+
+        const task: Promise<void> = cachedParsed
+          ? appendMatchRunLog(runId, `[parse] ${jobLabel} | cached`).then(() => {
+              results[idx] = { parsed: cachedParsed, parseError: null };
+            })
+          : job.job_url
           ? appendMatchRunLog(runId, `[parse] ${jobLabel} | start | url=${job.job_url}`)
               .then(() => parseJobPost(job.job_url!))
               .then(async (parsed) => {

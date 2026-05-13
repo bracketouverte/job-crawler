@@ -40,6 +40,7 @@ export type JobRow = {
   posted_at: string | null;
   first_seen_at: string;
   last_seen_at: string;
+  parsed_jd?: string | null;
   analysis?: unknown;
 };
 
