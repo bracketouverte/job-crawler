@@ -14,6 +14,7 @@ RUN apk add --no-cache python3 py3-requests py3-yaml
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY public ./public
+RUN mkdir -p /app/state
 
 ENV PORT=3000
 EXPOSE 3000
