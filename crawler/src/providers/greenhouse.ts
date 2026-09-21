@@ -1,4 +1,5 @@
 import { firstString, joinStrings } from "../normalizers.js";
+import { extractCompensation, applySalaryToJob } from "../compensation.js";
 import { CrawlContext, IdentifierSource, NormalizedJob, ProviderCrawler, SourceEntry } from "../types.js";
 
 type GreenhouseResponse = {
@@ -35,25 +36,42 @@ export const greenhouseCrawler: ProviderCrawler = {
 
 export function normalizeGreenhouseJob(sourceKey: string, job: GreenhouseJob, fetchedAt: string): NormalizedJob {
   const id = firstString(job.id, job.internal_job_id, job.title) ?? "unknown";
-  return {
+  const baseJob: NormalizedJob = {
     provider: "greenhouse",
     source_key: sourceKey,
     job_id: id,
     title: firstString(job.title),
     location: firstString(job.location?.name),
     employment_type: null,
-    compensation: extractCompensation(job),
+    compensation: extractCompensationField(job),
     department: joinStrings(job.departments?.map((item) => item.name)),
     office: joinStrings(job.offices?.map((item) => item.name)),
     language: firstString(job.language),
     updated_at: firstString(job.updated_at),
     posted_at: firstString(job.updated_at),
     job_url: firstString(job.absolute_url),
-    fetched_at: fetchedAt
+    fetched_at: fetchedAt,
+    salary_min: null,
+    salary_max: null,
+    salary_currency: null,
+    salary_period: null,
+    salary_location: null,
+    salary_is_estimated: false,
+    work_mode: null,
   };
+
+  const contentText = typeof job.content === "string" ? job.content : "";
+  if (contentText) {
+    const salary = extractCompensation(contentText);
+    if (salary.min !== null) {
+      return applySalaryToJob(baseJob, salary);
+    }
+  }
+
+  return baseJob;
 }
 
-function extractCompensation(job: GreenhouseJob): string | null {
+function extractCompensationField(job: GreenhouseJob): string | null {
   const metadata = job.metadata;
   if (!metadata || typeof metadata !== "object") {
     return null;

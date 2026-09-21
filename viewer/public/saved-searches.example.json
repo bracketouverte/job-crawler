@@ -6,7 +6,10 @@
     "location": "Miami",
     "company": "",
     "sources": [],
-    "days": "1"
+    "days": "1",
+    "usOnly": false,
+    "noSalary": false,
+    "minSalary": 100000
   },
   {
     "id": "prom-queen-NY",
@@ -15,6 +18,9 @@
     "location": "remote",
     "company": "",
     "sources": [],
-    "days": "1"
+    "days": "1",
+    "usOnly": true,
+    "noSalary": true,
+    "minSalary": null
   }
 ]

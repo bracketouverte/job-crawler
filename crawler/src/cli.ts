@@ -21,6 +21,9 @@ type CliOptions = {
   timeoutMs: number;
   retries: number;
   progressFile: string;
+  enrichSalary: boolean;
+  salaryConcurrency: number;
+  jobTitleContains?: string;
 };
 
 const defaults: CliOptions = {
@@ -35,6 +38,9 @@ const defaults: CliOptions = {
   timeoutMs: 15000,
   retries: 2,
   progressFile: "/app/state/crawler-progress.json",
+  enrichSalary: false,
+  salaryConcurrency: 4,
+  jobTitleContains: process.env.JOB_TITLE_CONTAINS,
 };
 
 async function main(): Promise<void> {
@@ -47,7 +53,7 @@ async function main(): Promise<void> {
     concurrency: options.concurrency,
     outFile: options.out,
     reportFile: options.report,
-    catalogDbFile: options.catalogDbFile,
+    catalogDbFile: options.catalogDbFile || undefined,
     catalogFile: options.catalogFile,
     excludeSourcesFile: options.excludeSources,
     sample: options.sample,
@@ -58,6 +64,9 @@ async function main(): Promise<void> {
     timeoutMs: options.timeoutMs,
     retries: options.retries,
     progressFile: options.progressFile,
+    enrichSalary: options.enrichSalary,
+    salaryConcurrency: options.salaryConcurrency,
+    jobTitleContains: options.jobTitleContains,
   });
 
   await unlink(options.progressFile).catch(() => undefined);
@@ -152,6 +161,17 @@ export function parseArgs(args: string[]): CliOptions {
         options.progressFile = requireValue(arg, next);
         index += 1;
         break;
+      case "--enrich-salary":
+        options.enrichSalary = true;
+        break;
+      case "--salary-concurrency":
+        options.salaryConcurrency = parsePositiveInteger(arg, requireValue(arg, next));
+        index += 1;
+        break;
+      case "--job-title-contains":
+        options.jobTitleContains = requireValue(arg, next);
+        index += 1;
+        break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
     }
@@ -192,7 +212,7 @@ Options:
   --concurrency <n>        Global source concurrency (default: 50)
   --out <file>             JSONL output path (default: /app/output/jobs.jsonl)
   --report <file>          Report JSON path (default: /app/output/report.json)
-  --catalog-db <file>      SQLite catalog state file (default: /app/state/catalog.sqlite)
+  --catalog-db <file>      SQLite catalog state file (default: /app/state/catalog.sqlite, or PostgreSQL if PG_HOST env var is set)
   --catalog-file <file>    Persistent current-jobs catalog JSONL (add/update/remove)
   --exclude-sources <file> JSONL source quarantine file
   --sample <n>             Crawl only first n sources per provider
@@ -202,6 +222,9 @@ Options:
   --provider-concurrency <spec> Per-provider limits, e.g. ashby=2,workday=10 (default: ashby=2)
   --timeout-ms <n>         Per-request timeout (default: 15000)
   --retries <n>            Transient retry count (default: 2)
+  --enrich-salary          Fetch job pages after crawl to extract salary data
+  --salary-concurrency <n> Concurrent page fetches for salary extraction (default: 4)
+  --job-title-contains <keywords> Comma-separated title keywords to filter salary enrichment (also via JOB_TITLE_CONTAINS env var)
 `);
 }
 

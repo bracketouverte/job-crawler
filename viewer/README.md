@@ -38,6 +38,13 @@ The viewer expects access to the matcher codebase because it can parse job URLs 
 - `NVIDIA_MODEL`
 - `SAVED_SEARCH_ANALYZER_ENABLED` (`0` disables the idle saved-search full analyzer)
 - `SAVED_SEARCH_ANALYZER_INTERVAL_MS` (default `60000`)
+- `TARGET_TITLES` (comma-separated target titles; when set, the auto-analyzer skips non-matching jobs without an LLM call)
+- `TARGET_TITLES_PATH` (default `viewer/public/target-titles.json`; used when `TARGET_TITLES` is empty)
+- `TITLE_FILTER_URL` (default `http://title-filter:8001/score`; Laya sidecar — substring fallback when unreachable)
+- `TITLE_MATCH_MIN_CONFIDENCE` (default `0.85`; below-threshold Laya results fall back to the LLM)
+- `JOB_LOCATION_TYPE` (e.g. `"remote_US, hybrid_US, onsite_US"`; empty disables; unknown work mode is fail-open)
+- `JOB_LOCATION_METRO` (e.g. `"chicago, los angeles"`; job location must contain one entry; empty disables)
+- `SALARY` (e.g. `"120000"`; job qualifies when the number is inside its salary range; blank disables, unknown salary is fail-open)
 - `SAVED_SEARCHES_PATH`
 - `CRAWLER_ACTIVE_LOCK_PATH`
 - `CRAWLER_ACTIVE_LOCK_STALE_MS`
@@ -54,6 +61,17 @@ The viewer expects access to the matcher codebase because it can parse job URLs 
 - `GET /api/match-runs/:id/results`
 - `GET /api/job-parsed`
 - `GET /api/logo-dev/brand`
+- `GET /api/auto-analyzer`
+- `GET /api/title-filter` (effective targets, threshold, sidecar health)
+
+## Title Pre-filter (Laya)
+
+Before the auto-analyzer spends an LLM call, each candidate job is scored by the `title-filter` sidecar ([Laya](https://github.com/NandhaKishorM/laya) English checkpoint, single forward pass) against `TARGET_TITLES` / `target-titles.json`, plus deterministic location/salary gates:
+
+- high-confidence title mismatch, location-type/metro mismatch, or salary out of range → skipped, marker recorded in `job-analysis-cache.json` (`filter_skip`) so the 60s loop doesn't rescan it
+- match, low confidence, missing data (fail-open), or sidecar unreachable → falls back to the normal LLM ensemble path
+
+Run the sidecar with `docker compose up -d title-filter` (or it starts with `viewer` via `depends_on`). Check `GET /api/title-filter` for effective config and sidecar health.
 
 ## Discord Notifications
 

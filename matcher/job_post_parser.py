@@ -19,6 +19,11 @@ try:
 except ImportError:  # pragma: no cover - package import path
     from .matching_intelligence import extract_tools
 
+try:
+    from salary_extractor import extract_salary_structured
+except ImportError:  # pragma: no cover - package import path
+    from .salary_extractor import extract_salary_structured
+
 DEFAULT_TIMEOUT = (10, 60)
 
 RESPONSIBILITY_KEYWORDS_RAW = {
@@ -323,9 +328,9 @@ def extract_concepts(title, *blocks, limit=10):
     return selected
 
 
-def build_result(url, provider, title, posted_datetime, location, compensation, workplace_type, employment_type, responsibilities, requirements_summary, concept_text, nice_to_have_requirements=None):
+def build_result(url, provider, title, posted_datetime, location, compensation, workplace_type, employment_type, responsibilities, requirements_summary, concept_text, nice_to_have_requirements=None, salary_structured=None):
     nice_to_have_requirements = nice_to_have_requirements or []
-    return {
+    result = {
         "url": url,
         "provider": provider,
         "title": title,
@@ -349,6 +354,14 @@ def build_result(url, provider, title, posted_datetime, location, compensation, 
             "\n".join(nice_to_have_requirements),
         ])),
     }
+    if salary_structured:
+        result["salary_min"] = salary_structured.get("min")
+        result["salary_max"] = salary_structured.get("max")
+        result["salary_currency"] = salary_structured.get("currency")
+        result["salary_period"] = salary_structured.get("period")
+        result["salary_location"] = salary_structured.get("location")
+        result["salary_is_estimated"] = salary_structured.get("is_estimated", False)
+    return result
 
 
 def extract_greenhouse_identifiers(url, raw_html=None):
@@ -444,19 +457,24 @@ def parse_greenhouse(url):
     requirements, nice_to_have = split_requirement_sections(sections)
     location = ((payload.get("location") or {}).get("name") if isinstance(payload.get("location"), dict) else None)
 
+    compensation_raw = extract_greenhouse_compensation(payload.get("metadata"))
+    compensation_text = compensation_raw or content
+    salary_structured = extract_salary_structured(compensation_text)
+
     return build_result(
         url=url,
         provider="greenhouse",
         title=payload.get("title"),
         posted_datetime=payload.get("first_published") or payload.get("updated_at"),
         location=location,
-        compensation=infer_compensation(extract_greenhouse_compensation(payload.get("metadata")), content),
+        compensation=infer_compensation(compensation_raw, content),
         workplace_type=infer_workplace_type(location, content),
         employment_type=infer_employment_type(content),
         responsibilities=responsibilities,
         requirements_summary=requirements,
         nice_to_have_requirements=nice_to_have,
         concept_text="\n".join(html_to_lines(content)),
+        salary_structured=salary_structured,
     )
 
 
@@ -509,6 +527,7 @@ def parse_lever(url):
     )
     categories = job.get("categories") or {}
     workplace_type = job.get("workplaceType")
+    salary_structured = extract_salary_structured(description_text)
 
     return build_result(
         url=url,
@@ -523,6 +542,7 @@ def parse_lever(url):
         requirements_summary=requirements,
         nice_to_have_requirements=nice_to_have,
         concept_text=description_text,
+        salary_structured=salary_structured,
     )
 
 
@@ -543,6 +563,7 @@ def parse_bamboohr(url):
     description = str(job.get("description", ""))
     sections = extract_sections_from_html(description)
     requirements, nice_to_have = split_requirement_sections(sections)
+    salary_structured = extract_salary_structured(description)
 
     return build_result(
         url=url,
@@ -557,6 +578,7 @@ def parse_bamboohr(url):
         requirements_summary=requirements,
         nice_to_have_requirements=nice_to_have,
         concept_text="\n".join(html_to_lines(description)),
+        salary_structured=salary_structured,
     )
 
 
@@ -576,6 +598,8 @@ def parse_generic_jobposting(url):
         location,
         description,
     )
+    compensation_ld = extract_ld_json_compensation(jobposting)
+    salary_structured = extract_salary_structured(description)
 
     return build_result(
         url=url,
@@ -583,13 +607,14 @@ def parse_generic_jobposting(url):
         title=jobposting.get("title"),
         posted_datetime=jobposting.get("datePosted"),
         location=location,
-        compensation=extract_ld_json_compensation(jobposting) or infer_compensation(None, description),
+        compensation=compensation_ld or infer_compensation(None, description),
         workplace_type=workplace_type,
         employment_type=infer_employment_type(jobposting.get("employmentType"), description),
         responsibilities=bulletize(select_section(sections, RESPONSIBILITY_KEYWORDS)),
         requirements_summary=requirements,
         nice_to_have_requirements=nice_to_have,
         concept_text="\n".join(html_to_lines(description)),
+        salary_structured=salary_structured,
     )
 
 

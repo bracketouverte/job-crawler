@@ -6,8 +6,9 @@ import test from "node:test";
 import { loadSourceFile, parseProviderList, sourceKey } from "./source-loader.js";
 
 test("parseProviderList supports all and comma-separated providers", () => {
-  assert.deepEqual(parseProviderList("all"), ["ashby", "bamboohr", "greenhouse", "lever", "teamtailor", "workable", "workday"]);
+  assert.deepEqual(parseProviderList("all"), ["ashby", "bamboohr", "greenhouse", "lever", "smartrecruiters", "teamtailor", "workable", "workday"]);
   assert.deepEqual(parseProviderList("lever,greenhouse"), ["lever", "greenhouse"]);
+  assert.deepEqual(parseProviderList("smartrecruiters"), ["smartrecruiters"]);
 });
 
 test("parseProviderList rejects unsupported providers", () => {

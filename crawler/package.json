@@ -13,11 +13,13 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
-    "fast-xml-parser": "^4.5.1"
+    "fast-xml-parser": "^4.5.1",
+    "pg": "^8.11.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^24.0.0",
+    "@types/pg": "^8.10.0",
     "typescript": "^5.9.0"
   },
   "engines": {

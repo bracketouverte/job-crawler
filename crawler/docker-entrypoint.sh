@@ -3,6 +3,12 @@
 
 set -e
 
+# Source optional .envrc for environment variables like JOB_TITLE_CONTAINS
+if [ -f "/app/.envrc" ]; then
+  echo "[ENTRYPOINT] Sourcing /app/.envrc..."
+  . /app/.envrc
+fi
+
 LOCK_FILE="${CRAWLER_ACTIVE_LOCK_PATH:-/app/state/crawler-active.lock}"
 mkdir -p "$(dirname "$LOCK_FILE")"
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$LOCK_FILE"

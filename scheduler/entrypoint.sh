@@ -34,7 +34,7 @@ last_run_minutes_ago() {
 run_crawler() {
   echo "[SCHEDULER] Triggering crawler..."
   record_run
-  docker compose -f /project/docker-compose.yml --project-directory "${PROJECT_DIR}" run --rm crawler || true
+  docker start job-crawler-mike-crawler-1 || true
   echo "[SCHEDULER] Crawler done."
 }
 

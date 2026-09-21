@@ -38,6 +38,15 @@
         <span class="crawl-bar-pct" id="crawl-bar-pct"></span>
         <div class="crawl-popover" id="crawl-popover"></div>
       </div>
+      <div class="sort-controls" id="sort-controls">
+        <label class="sort-label">Sort</label>
+        <select id="sort-select" class="sort-select">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="salary_desc">Highest salary</option>
+          <option value="salary_asc">Lowest salary</option>
+        </select>
+      </div>
     </div>
     <div class="filters-grid">
       <div class="filter-group">
@@ -46,7 +55,13 @@
       </div>
       <div class="filter-group">
         <label class="filter-label" for="filter-location">Location</label>
-        <input id="filter-location" class="filter-input" type="text" placeholder="Paris, Remote" autocomplete="off" />
+        <div class="location-filter-row">
+          <input id="filter-location" class="filter-input" type="text" placeholder="Paris, Remote" autocomplete="off" />
+          <label class="us-filter-checkbox" title="Show only United States jobs">
+            <input type="checkbox" id="filter-us-only" />
+            <span>US only</span>
+          </label>
+        </div>
       </div>
       <div class="filter-group">
         <label class="filter-label" for="filter-company">Company</label>
@@ -62,6 +77,16 @@
       <div class="filter-group">
         <label class="filter-label" for="filter-days">Max age</label>
         <input id="filter-days" class="filter-input" type="number" min="1" placeholder="7" />
+      </div>
+      <div class="filter-group">
+        <label class="filter-label">Salary</label>
+        <div class="salary-filter-row">
+          <label class="salary-checkbox" title="Show only jobs with no salary listed">
+            <input type="checkbox" id="filter-no-salary" />
+            <span>No salary</span>
+          </label>
+          <input id="filter-min-salary" class="filter-input filter-input-sm" type="number" min="0" placeholder="Min salary" />
+        </div>
       </div>
     </div>
   </section>

@@ -107,6 +107,47 @@ Default output directory: `crawler/output/`
 
 The repository ignores all local artifacts (only `.gitkeep` is tracked).
 
+## Selective Salary & Remote Work Enrichment
+
+By default, `--enrich-salary` fetches every job's detail page to extract salary data.
+You can limit this to specific job titles using `JOB_TITLE_CONTAINS`.
+
+### How it works
+
+1. Set `JOB_TITLE_CONTAINS` in `crawler/.envrc` (or pass via `docker-compose.yml`):
+   ```
+   JOB_TITLE_CONTAINS="product manager, program manager, engineering manager"
+   ```
+2. When `--enrich-salary` is enabled, only jobs whose title contains one of the
+   comma-separated keywords (case-insensitive) will have their detail page fetched.
+3. For each matched job, the crawler extracts:
+   - **Salary** — min, max, currency, period, and whether it is estimated
+   - **Work mode** — classified as `remote`, `hybrid`, or `onsite`
+
+### Configuration
+
+| Method | Example |
+|--------|---------|
+| `.envrc` file | `JOB_TITLE_CONTAINS="product manager, program manager"` |
+| `.env` (root) | `JOB_TITLE_CONTAINS="product manager, program manager"` |
+| CLI flag | `--job-title-contains "product manager, program manager"` |
+
+Leave `JOB_TITLE_CONTAINS` unset or empty to enrich **all** jobs (backward-compatible).
+
+### Output fields
+
+Enriched jobs include these additional fields in the JSONL output:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `salary_min` | `number \| null` | Minimum salary (annualized) |
+| `salary_max` | `number \| null` | Maximum salary (annualized) |
+| `salary_currency` | `string \| null` | ISO currency code (USD, EUR, GBP) |
+| `salary_period` | `string \| null` | `annual`, `monthly`, `weekly`, or `hourly` |
+| `salary_location` | `string \| null` | Location tied to the salary, if specified |
+| `salary_is_estimated` | `boolean` | Whether the salary is an estimate |
+| `work_mode` | `"remote" \| "hybrid" \| "onsite" \| null` | Classified work arrangement |
+
 ## Source Quarantine (Optional)
 
 Skip broken sources using an exclusion file:

@@ -1,0 +1,9 @@
+{
+  "provider": "workable",
+  "url_template": "https://apply.workable.com/api/v1/widget/accounts/{identifier}",
+  "companies": [
+    {
+      "identifier": "example-company"
+    }
+  ]
+}

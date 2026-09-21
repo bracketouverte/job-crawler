@@ -1,0 +1,11 @@
+{
+  "name": "job-crawler-migration",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "pg": "^8.11.3"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^9.4.3"
+  }
+}

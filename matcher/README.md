@@ -3,7 +3,7 @@
 The `matcher` module handles two jobs:
 
 - parse a public job-post URL into structured fields
-- score job fit against the local profile using NVIDIA NIM
+- score job fit against the local profile using `google/gemma-4-e2b` at `http://127.0.0.1:1235` (OpenAI-compatible)
 
 ## Main Files
 
@@ -62,7 +62,7 @@ docker compose run --rm matcher \
 Dry run:
 
 ```bash
-docker compose run --rm matcher --dry-run --model meta/llama-4-maverick-17b-128e-instruct -p /app
+docker compose run --rm matcher --dry-run --model google/gemma-4-e2b -p /app
 ```
 
 Full-fit ensemble pipeline:
@@ -75,14 +75,15 @@ docker compose run --rm matcher \
   --profile-dir /app/career-ops
 ```
 
-`job_fit_analyzer.py` is the quick-fit pipeline backed by Maverick. `ensemble_runner.py` is the full-fit pipeline that runs multiple scorer models, then synthesizes them into a final assessment.
+`job_fit_analyzer.py` is the quick-fit pipeline (single `google/gemma-4-e2b` call). `ensemble_runner.py` is the full-fit pipeline (parallel `google/gemma-4-e2b` scorers + `google/gemma-4-e2b` synthesizer, configurable via `NVIDIA_ENSEMBLE_SCORERS`/`NVIDIA_ENSEMBLE_SYNTHESIZER`).
 
 ## Environment
 
 - `NVIDIA_API_KEY`
-- `NVIDIA_MODEL` default: `meta/llama-4-maverick-17b-128e-instruct`
+- `NVIDIA_MODEL` default: `google/gemma-4-e2b`
+- `NVIDIA_BASE_URL` default: `http://127.0.0.1:1235` (or `http://127.0.0.1:1235/v1`), `NVIDIA_CHAT_COMPLETIONS_URL` overrides
 
-These are forwarded by `docker-compose.yml`.
+These are forwarded by `docker-compose.yml` (see `.env.example`).
 
 - `CAREER_OPS_DIR` default: `career-ops`
 

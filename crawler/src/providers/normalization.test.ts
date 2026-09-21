@@ -4,6 +4,7 @@ import { normalizeAshbyJob } from "./ashby.js";
 import { normalizeBambooJob } from "./bamboohr.js";
 import { normalizeGreenhouseJob } from "./greenhouse.js";
 import { normalizeLeverJob } from "./lever.js";
+import { normalizeSmartrecruitersJob } from "./smartrecruiters.js";
 import { normalizeTeamtailorJob } from "./teamtailor.js";
 import { normalizeWorkableJob } from "./workable.js";
 import { normalizeWorkdayJob, parseWorkdayPostedAt } from "./workday.js";
@@ -71,6 +72,30 @@ test("normalizes Lever jobs", () => {
   assert.equal(job.title, "Account Executive");
   assert.equal(job.employment_type, "Full-time");
   assert.equal(job.department, "Sales");
+});
+
+test("normalizes SmartRecruiters postings", () => {
+  const job = normalizeSmartrecruitersJob("ServiceNow", {
+    id: "744000150513709",
+    name: "Staff Inbound Product Manager",
+    releasedDate: "2026-09-19T20:45:05.634Z",
+    location: { city: "San Diego", region: "California", country: "us", fullLocation: "San Diego, California, United States", remote: false, hybrid: true },
+    department: { label: "Digital Technology" },
+    function: { label: "Product Management" },
+    typeOfEmployment: { label: "Full-time" },
+    language: { code: "en" }
+  }, fetchedAt);
+
+  assert.equal(job.provider, "smartrecruiters");
+  assert.equal(job.job_id, "744000150513709");
+  assert.equal(job.title, "Staff Inbound Product Manager");
+  assert.equal(job.location, "San Diego, California, United States");
+  assert.equal(job.employment_type, "Full-time");
+  assert.equal(job.department, "Digital Technology");
+  assert.equal(job.office, "Hybrid");
+  assert.equal(job.work_mode, "hybrid");
+  assert.equal(job.updated_at, "2026-09-19T20:45:05.634Z");
+  assert.equal(job.job_url, "https://jobs.smartrecruiters.com/ServiceNow/744000150513709");
 });
 
 test("normalizes Teamtailor RSS items", () => {

@@ -3,6 +3,7 @@ export const providers = [
   "bamboohr",
   "greenhouse",
   "lever",
+  "smartrecruiters",
   "teamtailor",
   "workable",
   "workday",
@@ -36,6 +37,13 @@ export type NormalizedJob = {
   location: string | null;
   employment_type: string | null;
   compensation: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  salary_period: string | null;
+  salary_location: string | null;
+  salary_is_estimated: boolean;
+  work_mode: "remote" | "hybrid" | "onsite" | null;
   department: string | null;
   office: string | null;
   language: string | null;

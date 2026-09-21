@@ -1,5 +1,6 @@
 import express from "express";
-import Database from "better-sqlite3";
+import db from "./db.js";
+import { decideJobFilters, loadFilterCriteria } from "./job-filter.js";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -27,6 +28,13 @@ const CRAWLER_ACTIVE_LOCK_STALE_MS = parseInt(process.env.CRAWLER_ACTIVE_LOCK_ST
 const CRAWLER_PROGRESS_PATH = process.env.CRAWLER_PROGRESS_PATH ?? join(STATE_DIR, "crawler-progress.json");
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL?.trim() ?? "";
 const SCORE_NOTIFY_MIN_SCORE = parseFloat(process.env.SCORE_NOTIFY_MIN_SCORE ?? "4");
+const TITLE_FILTER_URL = process.env.TITLE_FILTER_URL?.trim() ?? "";
+const TARGET_TITLES_RAW = process.env.TARGET_TITLES?.trim() ?? "";
+const TARGET_TITLES_PATH = process.env.TARGET_TITLES_PATH ?? join(__dirname, "../public/target-titles.json");
+const TITLE_MATCH_MIN_CONFIDENCE = parseFloat(process.env.TITLE_MATCH_MIN_CONFIDENCE ?? "0.85");
+const JOB_LOCATION_TYPE_RAW = process.env.JOB_LOCATION_TYPE?.trim() ?? "";
+const JOB_LOCATION_METRO_RAW = process.env.JOB_LOCATION_METRO?.trim() ?? "";
+const SALARY_RAW = process.env.SALARY?.trim() ?? "";
 const LOGO_CACHE_MAX = 2000;
 const logoDevBrandCache = new Map<string, string | null>();
 const activeRunIds = new Set<string>();
@@ -56,6 +64,12 @@ type JobRow = {
   location: string | null;
   employment_type: string | null;
   compensation: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  salary_period: string | null;
+  salary_location: string | null;
+  salary_is_estimated: boolean;
   department: string | null;
   job_url: string | null;
   updated_at: string | null;
@@ -77,6 +91,8 @@ type CachedJobAnalysis = {
   analysis?: unknown;
   analyzed_at?: string;
   run_id?: string;
+  title_match?: { match: boolean; reason: string; checked_at: string; family?: string | null; confidence?: number };
+  filter_skip?: { factor: string; reason: string; checked_at: string; family?: string | null; confidence?: number };
 };
 
 type AnalysisCache = Record<string, CachedJobAnalysis>;
@@ -135,6 +151,12 @@ type ParsedJobPost = {
   posted_datetime?: string | null;
   location?: string | null;
   compensation?: string | null;
+  salary_min?: number | null;
+  salary_max?: number | null;
+  salary_currency?: string | null;
+  salary_period?: string | null;
+  salary_location?: string | null;
+  salary_is_estimated?: boolean;
   workplace_type?: string | null;
   employment_type?: string | null;
   responsibilities?: string[];
@@ -154,29 +176,43 @@ type SavedSearch = {
   company?: string;
   days?: string | number;
   sources?: string[];
+  usOnly?: boolean;
+  noSalary?: boolean;
+  minSalary?: number;
 };
 
-const db = new Database(DB_PATH, { fileMustExist: true });
-db.pragma("busy_timeout = 30000");
-const selectJobStatement = db.prepare(
-  `SELECT provider, source_key, job_id, title, location, employment_type,
-          compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
-   FROM catalog_jobs
-   WHERE provider = ? AND source_key = ? AND job_id = ?`
-);
-const updateParsedMetadataStatement = db.prepare(
-  `UPDATE catalog_jobs
-   SET
-     location = CASE
-       WHEN @location IS NOT NULL AND TRIM(@location) <> '' AND (location IS NULL OR TRIM(location) = '') THEN @location
-       ELSE location
-     END,
-     compensation = CASE
-       WHEN @compensation IS NOT NULL AND TRIM(@compensation) <> '' THEN @compensation
-       ELSE compensation
-     END
-   WHERE provider = @provider AND source_key = @source_key AND job_id = @job_id`
-);
+// Hybrid db (pg primary + sqlite fallback) is imported as db
+async function selectJob(provider: string, source_key: string, job_id: string): Promise<JobRow | undefined> {
+  const row = await db.queryOne(
+    "SELECT provider, source_key, job_id, title, location, employment_type, compensation, salary_min, salary_max, salary_currency, salary_period, salary_location, salary_is_estimated, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at FROM catalog_jobs WHERE provider = $1 AND source_key = $2 AND job_id = $3",
+    [provider, source_key, job_id]
+  );
+  return row as JobRow | undefined;
+}
+
+async function persistParsedMetadata(job: JobRow, parsed: ParsedJobPost): Promise<void> {
+  const location = cleanParsedText(parsed.location);
+  const parsedCompensation = cleanParsedText(parsed.compensation);
+  const compensation = isRealCompensation(parsedCompensation) ? parsedCompensation : null;
+  if (!location && !compensation && parsed.salary_min == null) return;
+  try {
+    await db.query(
+      `UPDATE catalog_jobs SET
+        location = CASE WHEN $1 IS NOT NULL AND TRIM($1) <> '' AND (location IS NULL OR TRIM(location) = '') THEN $1 ELSE location END,
+        compensation = CASE WHEN $2 IS NOT NULL AND TRIM($2) <> '' THEN $2 ELSE compensation END,
+        salary_min = CASE WHEN $3 IS NOT NULL THEN $3 ELSE salary_min END,
+        salary_max = CASE WHEN $4 IS NOT NULL THEN $4 ELSE salary_max END,
+        salary_currency = CASE WHEN $5 IS NOT NULL THEN $5 ELSE salary_currency END,
+        salary_period = CASE WHEN $6 IS NOT NULL THEN $6 ELSE salary_period END,
+        salary_location = CASE WHEN $7 IS NOT NULL THEN $7 ELSE salary_location END,
+        salary_is_estimated = CASE WHEN $8 IS NOT NULL THEN $8 ELSE salary_is_estimated END
+       WHERE provider = $9 AND source_key = $10 AND job_id = $11`,
+      [location, compensation, parsed.salary_min ?? null, parsed.salary_max ?? null, parsed.salary_currency ?? null, parsed.salary_period ?? null, parsed.salary_location ?? null, parsed.salary_is_estimated ? 1 : 0, job.provider, job.source_key, job.job_id]
+    );
+  } catch (e) {
+    console.error("persistParsedMetadata error:", e);
+  }
+}
 
 // Returns an array of token groups with exclude flags.
 // Single-item group = AND bare word. Multi-item group = OR group (AND-ed with rest).
@@ -217,6 +253,9 @@ function addJobFilterConditions(
     company?: string | number | null;
     sources?: string | string[] | null;
     days?: string | number | null;
+    usOnly?: boolean | string | null;
+    noSalary?: boolean | string | null;
+    minSalary?: string | number | null;
   },
 ): { conditions: string[]; params: unknown[] } {
   const conditions: string[] = [];
@@ -231,16 +270,16 @@ function addJobFilterConditions(
     const tokens = parseTitleQuery(title);
     for (const token of tokens) {
       if (token.terms.length === 1) {
-        conditions.push(token.exclude ? "LOWER(title) NOT LIKE ?" : "LOWER(title) LIKE ?");
+        conditions.push(token.exclude ? `title NOT ILIKE $${params.length + 1}` : `title ILIKE $${params.length + 1}`);
         params.push(`%${token.terms[0]}%`);
       } else {
         if (token.exclude) {
-          const notClauses = token.terms.map(() => "LOWER(title) NOT LIKE ?");
-          conditions.push(`(${notClauses.join(" AND ")})`);
+          const clauses = token.terms.map((_, j) => `title NOT ILIKE $${params.length + j + 1}`);
+          conditions.push(`(${clauses.join(" AND ")})`);
           for (const t of token.terms) params.push(`%${t}%`);
         } else {
-          const orClauses = token.terms.map(() => "LOWER(title) LIKE ?");
-          conditions.push(`(${orClauses.join(" OR ")})`);
+          const clauses = token.terms.map((_, j) => `title ILIKE $${params.length + j + 1}`);
+          conditions.push(`(${clauses.join(" OR ")})`);
           for (const t of token.terms) params.push(`%${t}%`);
         }
       }
@@ -249,23 +288,23 @@ function addJobFilterConditions(
 
   if (location.trim()) {
     const locs = location.split(/[,]+/).map((l) => l.trim()).filter(Boolean);
-    const locClauses = locs.map(() => "LOWER(location) LIKE ?");
-    conditions.push(`(${locClauses.join(" OR ")})`);
-    for (const loc of locs) params.push(`%${loc.toLowerCase()}%`);
+    const clauses = locs.map((_, j) => `location ILIKE $${params.length + j + 1}`);
+    conditions.push(`(${clauses.join(" OR ")})`);
+    for (const loc of locs) params.push(`%${loc}%`);
   }
 
   if (company.trim()) {
     const companies = company.split(/[,]+/).map((c) => c.trim()).filter(Boolean);
-    const companyClauses = companies.map(() => "LOWER(source_key) LIKE ?");
-    conditions.push(`(${companyClauses.join(" OR ")})`);
-    for (const comp of companies) params.push(`%${comp.toLowerCase()}%`);
+    const clauses = companies.map((_, j) => `source_key ILIKE $${params.length + j + 1}`);
+    conditions.push(`(${clauses.join(" OR ")})`);
+    for (const comp of companies) params.push(`%${comp}%`);
   }
 
   if (sources.trim()) {
     const providerList = sources.split(/[,]+/).map((s) => s.trim()).filter(Boolean);
     if (providerList.length > 0) {
-      const providerClauses = providerList.map(() => "provider = ?");
-      conditions.push(`(${providerClauses.join(" OR ")})`);
+      const placeholders = providerList.map((_, j) => `$${params.length + j + 1}`).join(",");
+      conditions.push(`provider IN (${placeholders})`);
       for (const provider of providerList) params.push(provider);
     }
   }
@@ -273,8 +312,85 @@ function addJobFilterConditions(
   if (days.trim()) {
     const n = parseInt(days, 10);
     if (!Number.isNaN(n) && n > 0) {
-      conditions.push("COALESCE(posted_at, first_seen_at) >= datetime('now', ?)");
-      params.push(`-${n} days`);
+      const cutoff = new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+      conditions.push(`COALESCE(posted_at, first_seen_at) >= $${params.length + 1}`);
+      params.push(cutoff);
+    }
+  }
+
+  const usOnly = typeof filters.usOnly === "boolean" ? filters.usOnly : String(filters.usOnly ?? "").trim() === "1";
+  if (usOnly) {
+    const usPatterns = [
+      "location ILIKE '%united states%'",
+      "location ILIKE '%usa%'",
+      "location ILIKE '%, us%'",
+      "location ILIKE '%, us,%'",
+      "location ILIKE '%, al,%'", "location ILIKE '%, al %'",
+      "location ILIKE '%, ak,%'", "location ILIKE '%, ak %'",
+      "location ILIKE '%, az,%'", "location ILIKE '%, az %'",
+      "location ILIKE '%, ar,%'", "location ILIKE '%, ar %'",
+      "location ILIKE '%, ca,%'", "location ILIKE '%, ca %'",
+      "location ILIKE '%, co,%'", "location ILIKE '%, co %'",
+      "location ILIKE '%, ct,%'", "location ILIKE '%, ct %'",
+      "location ILIKE '%, de,%'", "location ILIKE '%, de %'",
+      "location ILIKE '%, fl,%'", "location ILIKE '%, fl %'",
+      "location ILIKE '%, ga,%'", "location ILIKE '%, ga %'",
+      "location ILIKE '%, hi,%'", "location ILIKE '%, hi %'",
+      "location ILIKE '%, id,%'", "location ILIKE '%, id %'",
+      "location ILIKE '%, il,%'", "location ILIKE '%, il %'",
+      "location ILIKE '%, in,%'", "location ILIKE '%, in %'",
+      "location ILIKE '%, ia,%'", "location ILIKE '%, ia %'",
+      "location ILIKE '%, ks,%'", "location ILIKE '%, ks %'",
+      "location ILIKE '%, ky,%'", "location ILIKE '%, ky %'",
+      "location ILIKE '%, la,%'", "location ILIKE '%, la %'",
+      "location ILIKE '%, me,%'", "location ILIKE '%, me %'",
+      "location ILIKE '%, md,%'", "location ILIKE '%, md %'",
+      "location ILIKE '%, ma,%'", "location ILIKE '%, ma %'",
+      "location ILIKE '%, mi,%'", "location ILIKE '%, mi %'",
+      "location ILIKE '%, mn,%'", "location ILIKE '%, mn %'",
+      "location ILIKE '%, ms,%'", "location ILIKE '%, ms %'",
+      "location ILIKE '%, mo,%'", "location ILIKE '%, mo %'",
+      "location ILIKE '%, mt,%'", "location ILIKE '%, mt %'",
+      "location ILIKE '%, ne,%'", "location ILIKE '%, ne %'",
+      "location ILIKE '%, nv,%'", "location ILIKE '%, nv %'",
+      "location ILIKE '%, nh,%'", "location ILIKE '%, nh %'",
+      "location ILIKE '%, nj,%'", "location ILIKE '%, nj %'",
+      "location ILIKE '%, nm,%'", "location ILIKE '%, nm %'",
+      "location ILIKE '%, ny,%'", "location ILIKE '%, ny %'",
+      "location ILIKE '%, nc,%'", "location ILIKE '%, nc %'",
+      "location ILIKE '%, nd,%'", "location ILIKE '%, nd %'",
+      "location ILIKE '%, oh,%'", "location ILIKE '%, oh %'",
+      "location ILIKE '%, ok,%'", "location ILIKE '%, ok %'",
+      "location ILIKE '%, or,%'", "location ILIKE '%, or %'",
+      "location ILIKE '%, pa,%'", "location ILIKE '%, pa %'",
+      "location ILIKE '%, ri,%'", "location ILIKE '%, ri %'",
+      "location ILIKE '%, sc,%'", "location ILIKE '%, sc %'",
+      "location ILIKE '%, sd,%'", "location ILIKE '%, sd %'",
+      "location ILIKE '%, tn,%'", "location ILIKE '%, tn %'",
+      "location ILIKE '%, tx,%'", "location ILIKE '%, tx %'",
+      "location ILIKE '%, ut,%'", "location ILIKE '%, ut %'",
+      "location ILIKE '%, vt,%'", "location ILIKE '%, vt %'",
+      "location ILIKE '%, va,%'", "location ILIKE '%, va %'",
+      "location ILIKE '%, wa,%'", "location ILIKE '%, wa %'",
+      "location ILIKE '%, wv,%'", "location ILIKE '%, wv %'",
+      "location ILIKE '%, wi,%'", "location ILIKE '%, wi %'",
+      "location ILIKE '%, wy,%'", "location ILIKE '%, wy %'",
+      "location ILIKE '%, dc,%'", "location ILIKE '%, dc %'",
+    ];
+    conditions.push(`(${usPatterns.join(" OR ")})`);
+  }
+
+  const noSalary = typeof filters.noSalary === "boolean" ? filters.noSalary : String(filters.noSalary ?? "").trim() === "1";
+  if (noSalary) {
+    conditions.push("(compensation IS NULL OR TRIM(compensation) = '')");
+  }
+
+  const minSalaryStr = String(filters.minSalary ?? "").trim();
+  if (minSalaryStr) {
+    const minSalary = parseInt(minSalaryStr, 10);
+    if (!Number.isNaN(minSalary) && minSalary > 0) {
+      conditions.push(`salary_min >= $${params.length + 1}`);
+      params.push(minSalary);
     }
   }
 
@@ -724,26 +840,7 @@ function cleanParsedText(value: unknown): string | null {
   return text ? text : null;
 }
 
-function persistParsedMetadata(job: JobRow, parsed: ParsedJobPost): void {
-  const location = cleanParsedText(parsed.location);
-  const parsedCompensation = cleanParsedText(parsed.compensation);
-  const compensation = isRealCompensation(parsedCompensation) ? parsedCompensation : null;
-  if (!location && !compensation) {
-    return;
-  }
 
-  try {
-    updateParsedMetadataStatement.run({
-      provider: job.provider,
-      source_key: job.source_key,
-      job_id: job.job_id,
-      location,
-      compensation,
-    });
-  } catch (error) {
-    console.error("persistParsedMetadata error:", error);
-  }
-}
 
 function buildJdText(parsed: ParsedJobPost, job: JobRow): string {
   const responsibilities = Array.isArray(parsed.responsibilities) ? parsed.responsibilities : [];
@@ -990,31 +1087,38 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(join(__dirname, "../public")));
 
 app.get("/api/jobs", async (req, res) => {
-  const { title, location, days, company, sources, page, limit } = req.query as Record<string, string>;
+  const { title, location, days, company, sources, page, limit, us_only, no_salary, min_salary, sort } = req.query as Record<string, string>;
 
   const pageNum = Math.max(1, parseInt(page ?? "1", 10));
   const pageSize = Math.min(500, Math.max(1, parseInt(limit ?? "50", 10)));
   const offset = (pageNum - 1) * pageSize;
 
-  const { conditions, params } = addJobFilterConditions({ title, location, company, sources, days });
+  const { conditions, params } = addJobFilterConditions({ title, location, company, sources, days, usOnly: us_only, noSalary: no_salary, minSalary: min_salary });
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
+  const sortOrder = sort === "salary_desc"
+    ? "ORDER BY COALESCE(salary_max, salary_min) DESC NULLS LAST, COALESCE(posted_at, first_seen_at) DESC"
+    : sort === "salary_asc"
+    ? "ORDER BY COALESCE(salary_min, salary_max) ASC NULLS LAST, COALESCE(posted_at, first_seen_at) DESC"
+    : sort === "age_asc"
+    ? "ORDER BY COALESCE(posted_at, first_seen_at) ASC"
+    : "ORDER BY COALESCE(posted_at, first_seen_at) DESC";
+
   try {
     const analysisCache = await getAnalysisCache();
-    const total = (
-      db.prepare(`SELECT COUNT(*) as n FROM catalog_jobs ${where}`).get(...params) as { n: number }
-    ).n;
+    const countRow = await db.queryOne(`SELECT COUNT(*) as n FROM catalog_jobs ${where}`, params) as { n: unknown } | null;
+    const total = countRow ? parseInt(String((countRow as any).n ?? (countRow as any).count ?? 0), 10) : 0;
 
-    const jobs = db
-      .prepare(
+    const jobs = await db.query(
         `SELECT provider, source_key, job_id, title, location, employment_type,
-                compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+                compensation, salary_min, salary_max, salary_currency, salary_period, salary_location, salary_is_estimated,
+                department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
          FROM catalog_jobs ${where}
-         ORDER BY COALESCE(posted_at, first_seen_at) DESC
-         LIMIT ? OFFSET ?`
-      )
-      .all(...params, pageSize, offset) as JobRow[];
+         ${sortOrder}
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, pageSize, offset]
+      ) as JobRow[];
 
     const enrichedJobs = jobs.map((job) => ({
       ...sanitizeJob(job),
@@ -1035,7 +1139,7 @@ app.get("/api/job", async (req, res) => {
     res.status(400).json({ error: "provider, source_key, and job_id are required" });
     return;
   }
-  const job = selectJobStatement.get(provider, source_key, job_id) as JobRow | undefined;
+  const job = await selectJob(provider, source_key, job_id) as JobRow | undefined;
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
   try {
     const analysisCache = await getAnalysisCache();
@@ -1046,11 +1150,9 @@ app.get("/api/job", async (req, res) => {
   }
 });
 
-app.get("/api/sources", (_req, res) => {
+app.get("/api/sources", async (_req, res) => {
   try {
-    const providers = db
-      .prepare(`SELECT DISTINCT provider FROM catalog_jobs ORDER BY provider`)
-      .all() as { provider: string }[];
+    const providers = await db.query(`SELECT DISTINCT provider FROM catalog_jobs ORDER BY provider`) as { provider: string }[];
 
     res.json({ sources: providers.map((p) => p.provider) });
   } catch (err) {
@@ -1059,19 +1161,26 @@ app.get("/api/sources", (_req, res) => {
   }
 });
 
-app.get("/api/stats", (_req, res) => {
+app.get("/api/stats", async (_req, res) => {
   try {
-    const byProvider = db
-      .prepare(`SELECT provider, COUNT(*) as count FROM catalog_jobs GROUP BY provider ORDER BY count DESC`)
-      .all() as StatsRow[];
-
+    const byProviderRaw = await db.query(`SELECT provider, COUNT(*) as count FROM catalog_jobs GROUP BY provider ORDER BY count DESC`);
+    const byProvider = (byProviderRaw as Array<Record<string, unknown>>).map(r => ({ provider: r.provider as string, count: parseInt(String(r.count),10) }));
     const total = byProvider.reduce((s, r) => s + r.count, 0);
+    const lastRow = await db.queryOne(`SELECT MAX(last_seen_at) as ts FROM catalog_jobs`) as { ts: string | null } | null;
+    const lastSeen = lastRow?.ts ?? null;
 
-    const lastSeen = (
-      db.prepare(`SELECT MAX(last_seen_at) as ts FROM catalog_jobs`).get() as { ts: string | null }
-    ).ts;
+    let crawlProgress: Record<string, unknown> | null = null;
+    const active = await isCrawlerActive();
+    if (active) {
+      try {
+        const raw = await readFile(CRAWLER_PROGRESS_PATH, "utf8");
+        crawlProgress = JSON.parse(raw.trim()) as Record<string, unknown>;
+      } catch {
+        // progress file not yet written or unreadable
+      }
+    }
 
-    res.json({ total, byProvider, lastCrawl: lastSeen });
+    res.json({ total, byProvider, lastCrawl: lastSeen, crawlActive: active, crawlProgress });
   } catch (err) {
     console.error("/api/stats error:", err);
     res.status(500).json({ error: String(err) });
@@ -1100,7 +1209,8 @@ app.get("/api/crawl-status", async (_req, res) => {
   try {
     const active = await isCrawlerActive();
     if (!active) {
-      const { n: total_jobs } = db.prepare("SELECT COUNT(*) as n FROM catalog_jobs").get() as { n: number };
+      const cntRow = await db.queryOne("SELECT COUNT(*) as n FROM catalog_jobs") as { n: unknown } | null;
+      const total_jobs = cntRow ? parseInt(String((cntRow as any).n ?? (cntRow as any).count ?? 0),10) : 0;
       res.json({ active: false, next_run: nextScheduledRun().toISOString(), total_jobs });
       return;
     }
@@ -1142,7 +1252,7 @@ app.post("/api/match-runs", async (req, res) => {
 
   const selectedJobs: JobRow[] = [];
   for (const item of uniqueKeys.values()) {
-    const row = selectJobStatement.get(item.provider, item.source_key, item.job_id) as JobRow | undefined;
+    const row = await selectJob(item.provider, item.source_key, item.job_id) as JobRow | undefined;
     if (row) {
       selectedJobs.push(row);
     }
@@ -1204,7 +1314,7 @@ app.post("/api/match-runs-with-jd", async (req, res) => {
     res.status(400).json({ error: "jd_text is required" });
     return;
   }
-  const job = selectJobStatement.get(provider, source_key, job_id) as JobRow | undefined;
+  const job = await selectJob(provider, source_key, job_id) as JobRow | undefined;
   if (!job) { res.status(404).json({ error: "Job not found" }); return; }
 
   const runId = generateRunId();
@@ -1277,6 +1387,41 @@ app.get("/api/auto-analyzer", (_req, res) => {
     paused: savedSearchAnalyzerPaused,
     busy: savedSearchAnalyzerBusy,
     current: savedSearchAnalyzerCurrent,
+  });
+});
+
+app.get("/api/title-filter", async (_req, res) => {
+  const criteria = await loadFilterCriteria({
+    targetsRaw: TARGET_TITLES_RAW || undefined,
+    targetsPath: TARGET_TITLES_PATH,
+    locationTypesRaw: JOB_LOCATION_TYPE_RAW || undefined,
+    metrosRaw: JOB_LOCATION_METRO_RAW || undefined,
+    salaryRaw: SALARY_RAW || undefined,
+  });
+  let service: unknown = null;
+  if (TITLE_FILTER_URL) {
+    try {
+      const base = TITLE_FILTER_URL.replace(/\/score\/?$/, "");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      try {
+        const health = await fetch(`${base}/health`, { signal: controller.signal });
+        service = await health.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (err) {
+      service = { status: "unreachable", error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  res.json({
+    targets: criteria.targets,
+    locationTypes: criteria.locationTypes,
+    metros: criteria.metros,
+    salary: criteria.salary,
+    minConfidence: Number.isFinite(TITLE_MATCH_MIN_CONFIDENCE) ? TITLE_MATCH_MIN_CONFIDENCE : 0.85,
+    filterUrl: TITLE_FILTER_URL || null,
+    service,
   });
 });
 
@@ -1361,7 +1506,7 @@ app.get("/api/job-parsed", async (req, res) => {
     res.status(400).json({ error: "provider, source_key, and job_id are required" });
     return;
   }
-  const job = selectJobStatement.get(provider, source_key, job_id) as JobRow | undefined;
+  const job = await selectJob(provider, source_key, job_id) as JobRow | undefined;
   if (!job) {
     res.status(404).json({ error: "Job not found" });
     return;
@@ -1416,27 +1561,33 @@ async function findNextSavedSearchJob(): Promise<{ job: JobRow; search: SavedSea
       company: search.company,
       sources: search.sources,
       days: search.days,
+      usOnly: search.usOnly,
+      noSalary: search.noSalary,
+      minSalary: search.minSalary,
     });
     conditions.push("job_url IS NOT NULL");
     const where = `WHERE ${conditions.join(" AND ")}`;
     const batchSize = 200;
     let offset = 0;
     while (true) {
-      const jobs = db
-        .prepare(
+      const jobs = await db.query(
           `SELECT provider, source_key, job_id, title, location, employment_type,
-                  compensation, department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
+                  compensation, salary_min, salary_max, salary_currency, salary_period, salary_location, salary_is_estimated,
+                  department, job_url, updated_at, posted_at, first_seen_at, last_seen_at
            FROM catalog_jobs ${where}
            ORDER BY COALESCE(posted_at, first_seen_at) DESC
-           LIMIT ? OFFSET ?`
-        )
-        .all(...params, batchSize, offset) as JobRow[];
+           LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+          [...params, batchSize, offset]
+        ) as JobRow[];
 
       if (jobs.length === 0) break;
 
       for (const job of jobs) {
         const key = jobCacheKey(job);
         if (hiddenJobs.has(key) || hasFullAnalysis(analysisCache[key])) {
+          continue;
+        }
+        if (analysisCache[key]?.title_match?.match === false || analysisCache[key]?.filter_skip) {
           continue;
         }
         return { job, search };
@@ -1462,6 +1613,54 @@ async function runSavedSearchAnalyzerOnce(): Promise<void> {
     const next = await findNextSavedSearchJob();
     if (next === null) {
       return;
+    }
+
+    // Pre-filter: cheap System-1 gate before the expensive LLM ensemble.
+    // Title (Laya sidecar) + location type + metro + salary; every factor is
+    // fail-open on missing data. A definitive mismatch records a marker (so
+    // the 60s loop skips it) and returns without LLM.
+    const criteria = await loadFilterCriteria({
+      targetsRaw: TARGET_TITLES_RAW || undefined,
+      targetsPath: TARGET_TITLES_PATH,
+      locationTypesRaw: JOB_LOCATION_TYPE_RAW || undefined,
+      metrosRaw: JOB_LOCATION_METRO_RAW || undefined,
+      salaryRaw: SALARY_RAW || undefined,
+    });
+    const anyFilterConfigured =
+      criteria.targets.length > 0 || criteria.locationTypes.length > 0 || criteria.metros.length > 0 || criteria.salary !== null;
+    if (anyFilterConfigured) {
+      const decision = await decideJobFilters(next.job, criteria, {
+        filterUrl: TITLE_FILTER_URL || undefined,
+        minConfidence: Number.isFinite(TITLE_MATCH_MIN_CONFIDENCE) ? TITLE_MATCH_MIN_CONFIDENCE : 0.85,
+      });
+      if (!decision.proceed) {
+        const cache = await readAnalysisCache();
+        const key = jobCacheKey(next.job);
+        const existing = cache[key] ?? { pipelines: {} };
+        const marker = {
+          factor: decision.failedFactor ?? "unknown",
+          reason: decision.reason ?? "mismatch",
+          checked_at: new Date().toISOString(),
+          family: decision.family ?? null,
+          confidence: decision.confidence,
+        };
+        existing.filter_skip = marker;
+        if (decision.failedFactor === "title") {
+          existing.title_match = {
+            match: false,
+            reason: decision.reason ?? "mismatch",
+            checked_at: marker.checked_at,
+            family: decision.family ?? null,
+            confidence: decision.confidence,
+          };
+        }
+        cache[key] = existing;
+        await writeAnalysisCache(cache);
+        console.log(
+          `saved-search analyzer: filter skip | search=${next.search.id ?? next.search.label ?? "saved-search"} | job=${key} | factor=${marker.factor} | reason=${marker.reason} | engine=${decision.engine ?? "n/a"}`
+        );
+        return;
+      }
     }
 
     const runId = generateRunId();

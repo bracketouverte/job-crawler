@@ -331,8 +331,13 @@
       };
       const cleanCompensation = isRealCompensation(job.compensation) ? job.compensation : null;
       const salaryRange = extractSalaryRange(cleanCompensation);
+      const structuredSalary = formatStructuredSalary(job);
+      const salaryDisplay = structuredSalary || salaryRange || cleanCompensation;
+      const salaryHtml = salaryDisplay
+        ? `<span>${esc(salaryDisplay)}</span>`
+        : `<span class="no-salary-text">No salary</span>`;
       const jdMeta = [
-        metaText(salaryRange || cleanCompensation, 34),
+        salaryHtml,
         metaText(job.location, 40),
       ].filter(Boolean).join('<span class="dot"></span>');
 
@@ -992,7 +997,12 @@
 
   async function pollCrawlStatus() {
     try {
+      const wasActive = document.getElementById('crawl-indicator')?.classList.contains('active');
       await updateCrawlStatus();
+      const isActive = document.getElementById('crawl-indicator')?.classList.contains('active');
+      if (isActive || wasActive) {
+        await fetchStats();
+      }
     } catch {
       // non-fatal
     } finally {
@@ -1269,15 +1279,23 @@
   /* ── URL state persistence ───────────────────────────────────── */
   function pushUrlState(page) {
     const p = new URLSearchParams();
-    const title   = document.getElementById('filter-title').value.trim();
-    const loc     = document.getElementById('filter-location').value.trim();
-    const company = document.getElementById('filter-company').value.trim();
-    const days    = document.getElementById('filter-days').value.trim();
-    const sources = getSelectedProviders();
+    const title       = document.getElementById('filter-title').value.trim();
+    const loc         = document.getElementById('filter-location').value.trim();
+    const company     = document.getElementById('filter-company').value.trim();
+    const days        = document.getElementById('filter-days').value.trim();
+    const usOnly      = document.getElementById('filter-us-only').checked;
+    const noSalary    = document.getElementById('filter-no-salary').checked;
+    const minSalary   = document.getElementById('filter-min-salary').value.trim();
+    const sort        = document.getElementById('sort-select').value;
+    const sources     = getSelectedProviders();
     if (title)                    p.set('title', title);
     if (loc)                      p.set('loc', loc);
     if (company)                  p.set('company', company);
     if (days)                     p.set('days', days);
+    if (usOnly)                   p.set('us', '1');
+    if (noSalary)                 p.set('no_salary', '1');
+    if (minSalary)                p.set('min_salary', minSalary);
+    if (sort && sort !== 'newest') p.set('sort', sort);
     if (sources.length)           p.set('sources', sources.join(','));
     const activeIds = activeSavedSearches().map(s => searchId(s.id));
     if (activeIds.length > 0)     p.set('searches', activeIds.join(','));
@@ -1288,10 +1306,14 @@
 
   function restoreFromUrl() {
     const p = new URLSearchParams(location.search);
-    if (p.has('title'))    document.getElementById('filter-title').value    = p.get('title');
-    if (p.has('loc'))      document.getElementById('filter-location').value = p.get('loc');
-    if (p.has('company'))  document.getElementById('filter-company').value  = p.get('company');
-    if (p.has('days'))     document.getElementById('filter-days').value     = p.get('days');
+    if (p.has('title'))       document.getElementById('filter-title').value       = p.get('title');
+    if (p.has('loc'))         document.getElementById('filter-location').value    = p.get('loc');
+    if (p.has('company'))     document.getElementById('filter-company').value     = p.get('company');
+    if (p.has('days'))        document.getElementById('filter-days').value        = p.get('days');
+    if (p.has('us'))          document.getElementById('filter-us-only').checked   = p.get('us') === '1';
+    if (p.has('no_salary'))   document.getElementById('filter-no-salary').checked = p.get('no_salary') === '1';
+    if (p.has('min_salary'))  document.getElementById('filter-min-salary').value  = p.get('min_salary');
+    if (p.has('sort'))        document.getElementById('sort-select').value        = p.get('sort');
     // sources: deferred to loadSources() since checkboxes don't exist yet at boot
     activeSearchIds.clear();
     if (p.has('searches')) {
@@ -1305,9 +1327,11 @@
   }
 
   function applySearchLock(locked) {
-    ['filter-title','filter-location','filter-company','filter-days'].forEach(id => {
+    ['filter-title','filter-location','filter-company','filter-days','filter-min-salary'].forEach(id => {
       document.getElementById(id).disabled = locked;
     });
+    document.getElementById('filter-us-only').disabled = locked;
+    document.getElementById('filter-no-salary').disabled = locked;
     document.querySelector('.provider-btn')?.toggleAttribute('disabled', locked);
   }
 
@@ -1351,6 +1375,9 @@
             document.getElementById('filter-location').value = single.location ?? '';
             document.getElementById('filter-company').value  = single.company  ?? '';
             document.getElementById('filter-days').value     = single.days     ?? '';
+            document.getElementById('filter-us-only').checked = Boolean(single.usOnly);
+            document.getElementById('filter-no-salary').checked = Boolean(single.noSalary);
+            document.getElementById('filter-min-salary').value = single.minSalary ?? '';
             setSelectedProviders(single.sources || []);
           }
         }
@@ -1377,6 +1404,10 @@
   ['filter-title','filter-location','filter-company','filter-days'].forEach(id => {
     document.getElementById(id).addEventListener('input', onFilterChange);
   });
+  document.getElementById('filter-us-only').addEventListener('change', onFilterChange);
+  document.getElementById('filter-no-salary').addEventListener('change', onFilterChange);
+  document.getElementById('filter-min-salary').addEventListener('input', onFilterChange);
+  document.getElementById('sort-select').addEventListener('change', onFilterChange);
   document.getElementById('fav-only-toggle').addEventListener('change', renderCurrentView);
   document.getElementById('evaluated-only-toggle').addEventListener('change', renderCurrentView);
 
@@ -1426,16 +1457,24 @@
   /* ── Fetch jobs ──────────────────────────────────────────────── */
   function buildSearchParams(overrides = {}) {
     const p = new URLSearchParams();
-    const title   = overrides.title   ?? document.getElementById('filter-title').value.trim();
-    const loc     = overrides.loc     ?? document.getElementById('filter-location').value.trim();
-    const company = overrides.company ?? document.getElementById('filter-company').value.trim();
-    const days    = overrides.days    ?? document.getElementById('filter-days').value.trim();
-    const sources = overrides.sources ?? getSelectedProviders();
+    const title       = overrides.title       ?? document.getElementById('filter-title').value.trim();
+    const loc         = overrides.loc         ?? document.getElementById('filter-location').value.trim();
+    const company     = overrides.company     ?? document.getElementById('filter-company').value.trim();
+    const days        = overrides.days        ?? document.getElementById('filter-days').value.trim();
+    const usOnly      = overrides.usOnly      ?? document.getElementById('filter-us-only').checked;
+    const noSalary    = overrides.noSalary    ?? document.getElementById('filter-no-salary').checked;
+    const minSalary   = overrides.minSalary   ?? document.getElementById('filter-min-salary').value.trim();
+    const sources     = overrides.sources     ?? getSelectedProviders();
+    const sort        = overrides.sort        ?? document.getElementById('sort-select').value;
     if (title)          p.set('title', title);
     if (loc)            p.set('location', loc);
     if (company)        p.set('company', company);
     if (days)           p.set('days', days);
+    if (usOnly)         p.set('us_only', '1');
+    if (noSalary)       p.set('no_salary', '1');
+    if (minSalary)      p.set('min_salary', minSalary);
     if (sources.length) p.set('sources', sources.join(','));
+    if (sort && sort !== 'newest') p.set('sort', sort);
     return p;
   }
 
@@ -1470,12 +1509,32 @@
             if (!seen.has(k)) { seen.add(k); merged.push(job); }
           }
         }
-        // Sort merged by posted_at desc
-        merged.sort((a, b) => {
-          const da = a.posted_at || a.first_seen_at || '';
-          const db_ = b.posted_at || b.first_seen_at || '';
-          return da < db_ ? 1 : da > db_ ? -1 : 0;
-        });
+        const sort = document.getElementById('sort-select').value;
+        if (sort === 'salary_desc') {
+          merged.sort((a, b) => {
+            const sa = a.salary_max || a.salary_min || 0;
+            const sb = b.salary_max || b.salary_min || 0;
+            return sb - sa;
+          });
+        } else if (sort === 'salary_asc') {
+          merged.sort((a, b) => {
+            const sa = a.salary_min || a.salary_max || 0;
+            const sb = b.salary_min || b.salary_max || 0;
+            return sa - sb;
+          });
+        } else if (sort === 'age_asc') {
+          merged.sort((a, b) => {
+            const da = a.posted_at || a.first_seen_at || '';
+            const db_ = b.posted_at || b.first_seen_at || '';
+            return da > db_ ? 1 : da < db_ ? -1 : 0;
+          });
+        } else {
+          merged.sort((a, b) => {
+            const da = a.posted_at || a.first_seen_at || '';
+            const db_ = b.posted_at || b.first_seen_at || '';
+            return da < db_ ? 1 : da > db_ ? -1 : 0;
+          });
+        }
         totalJobs   = merged.length;
         pageSize    = merged.length;
         currentPage = 1;
@@ -1514,8 +1573,14 @@
       const crawlDate = data.lastCrawl
         ? new Date(data.lastCrawl).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
         : 'unknown';
-      document.getElementById('header-sub').textContent =
-        `${data.total.toLocaleString()} roles across ${data.byProvider.length} ATS sources · last sync ${crawlDate}`;
+      let statusText = `${data.total.toLocaleString()} roles across ${data.byProvider.length} ATS sources · last sync ${crawlDate}`;
+      if (data.crawlActive && data.crawlProgress) {
+        const p = data.crawlProgress;
+        const pct = p.percent ?? 0;
+        const jobs = p.total_jobs ?? 0;
+        statusText += ` · <strong style="color:var(--accent)">crawling ${pct}%</strong> (${jobs.toLocaleString()} jobs found)`;
+      }
+      document.getElementById('header-sub').innerHTML = statusText;
       document.getElementById('header-meta').innerHTML =
         `<span><strong>${data.total.toLocaleString()}</strong> open</span>` +
         `<span><strong>${data.byProvider.length}</strong> sources</span>`;
@@ -1618,7 +1683,37 @@
     const unique = [...new Set(numbers)].sort((a, b) => a - b);
     const prefix = currency ? currency + ' ' : '';
     if (unique.length === 1) return prefix + String(unique[0]);
-    return prefix + unique.slice(0, 2).join(' - '); // Show min and max
+    return prefix + unique.slice(0, 2).join(' - ');
+  }
+
+  function formatStructuredSalary(job) {
+    if (job.salary_min == null && job.salary_max == null) return null;
+    
+    const currency = job.salary_currency || '';
+    const min = job.salary_min;
+    const max = job.salary_max;
+    const period = job.salary_period || 'annual';
+    const location = job.salary_location;
+    const isEstimated = job.salary_is_estimated;
+    
+    let display = '';
+    if (min != null && max != null && min !== max) {
+      display = `${currency}${min.toLocaleString()} - ${currency}${max.toLocaleString()}`;
+    } else if (min != null) {
+      display = `${currency}${min.toLocaleString()}`;
+    } else {
+      return null;
+    }
+    
+    if (period === 'hourly') {
+      display += '/hr';
+    }
+    
+    if (isEstimated) {
+      display += ' (estimated)';
+    }
+    
+    return display;
   }
 
   function renderJdData(data) {
@@ -1635,9 +1730,10 @@
       return `<div class="jd-field"><div class="jd-field-label">${esc(label)}</div><div class="jd-chips">${items.map(i => `<span class="jd-chip">${esc(String(i))}</span>`).join('')}</div></div>`;
     };
     
-    // Extract clean salary range for compensation field
     const cleanCompensation = isRealCompensation(data.compensation) ? data.compensation : null;
     const salaryRange = extractSalaryRange(cleanCompensation);
+    const structuredSalary = formatStructuredSalary(data);
+    const salaryDisplay = structuredSalary || salaryRange || cleanCompensation;
     
     return [
       field('Title', data.title),
@@ -1645,7 +1741,7 @@
       field('Location', data.location),
       field('Workplace type', data.workplace_type),
       field('Employment type', data.employment_type),
-      salaryRange ? field('Compensation', salaryRange) : field('Compensation', cleanCompensation),
+      salaryDisplay ? field('Compensation', salaryDisplay) : '',
       field('Posted', data.posted_datetime),
       chips('JD concepts', data.jd_concepts),
       list('Responsibilities', data.responsibilities),
@@ -1683,6 +1779,9 @@
     const page = restoreFromUrl();
     const urlSources = new URLSearchParams(location.search).get('sources');
     setSelectedProviders(urlSources ? urlSources.split(',').filter(Boolean) : []);
+    document.getElementById('filter-us-only').checked = new URLSearchParams(location.search).get('us') === '1';
+    document.getElementById('filter-no-salary').checked = new URLSearchParams(location.search).get('no_salary') === '1';
+    document.getElementById('filter-min-salary').value = new URLSearchParams(location.search).get('min_salary') || '';
     document.querySelectorAll('.saved-btn').forEach(btn => {
       const id = searchId(btn.dataset.searchId);
       btn.classList.toggle('active', activeSearchIds.has(id));

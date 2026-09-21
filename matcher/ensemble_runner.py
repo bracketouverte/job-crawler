@@ -27,7 +27,7 @@ BASE_DIR = Path(__file__).parent
 DEFAULT_PROFILE_DIR = "career-ops"
 
 API_KEY = os.environ.get("NVIDIA_API_KEY", "").strip()
-DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+DEFAULT_NVIDIA_BASE_URL = "http://127.0.0.1:1235/v1"
 
 
 def chat_completions_url():
@@ -50,11 +50,9 @@ def chat_completions_url():
 
 CHAT_COMPLETIONS_URL = chat_completions_url()
 DEFAULT_SCORERS = [
-    "meta/llama-4-maverick-17b-128e-instruct",
-    "moonshotai/kimi-k2-instruct",
-    "deepseek-ai/deepseek-v4-flash",
+    "google/gemma-4-e2b",
 ]
-DEFAULT_SYNTHESIZER = "deepseek-ai/deepseek-v4-flash"
+DEFAULT_SYNTHESIZER = "google/gemma-4-e2b"
 
 
 def csv_env(name, default):

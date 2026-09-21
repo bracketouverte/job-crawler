@@ -175,6 +175,34 @@ body {
 .filters-stats { font-size: 12px; color: var(--muted); text-align: right; }
 .filters-stats strong { color: var(--ink); font-weight: 600; }
 
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sort-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+.sort-select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.sort-select:focus { border-color: var(--muted-2); }
+
 .filters-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 0.6fr;
@@ -208,6 +236,68 @@ body {
 }
 .filter-input:focus { border-color: var(--muted-2); }
 .filter-input::placeholder { color: var(--muted-2); }
+
+.location-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.location-filter-row .filter-input {
+  flex: 1;
+}
+.us-filter-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.us-filter-checkbox input {
+  cursor: pointer;
+  accent-color: var(--ink);
+  width: 15px;
+  height: 15px;
+}
+
+.salary-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.salary-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.salary-checkbox input {
+  cursor: pointer;
+  accent-color: var(--ink);
+  width: 15px;
+  height: 15px;
+}
+.filter-input-sm {
+  height: 28px !important;
+  font-size: 12px !important;
+  padding: 0 8px !important;
+  width: 100px !important;
+}
+
+.no-salary-text {
+  color: var(--muted);
+  font-style: italic;
+}
 
 /* provider dropdown */
 .provider-dropdown { position: relative; }

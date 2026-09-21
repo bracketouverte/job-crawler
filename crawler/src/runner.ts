@@ -5,6 +5,8 @@ import { CatalogStore } from "./catalog-store.js";
 import { HttpError, createHttpClient } from "./http.js";
 import { crawlerByProvider } from "./providers/index.js";
 import { isProvider, loadSourceFile, sourceKey } from "./source-loader.js";
+import { enrichJobsWithSalary, readJobsJsonl, writeJobsJsonl } from "./salary-enricher.js";
+import { parseTitleKeywords } from "./title-filter.js";
 import { CrawlFailure, CrawlReport, NormalizedJob, Provider, ProviderStats, providers, SourceEntry } from "./types.js";
 
 export type RunOptions = {
@@ -24,6 +26,9 @@ export type RunOptions = {
   timeoutMs: number;
   retries: number;
   progressFile?: string;
+  enrichSalary?: boolean;
+  salaryConcurrency?: number;
+  jobTitleContains?: string;
 };
 
 type WorkItem = {
@@ -60,6 +65,9 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
   await mkdir(dirname(options.reportFile), { recursive: true });
 
   const catalogStore = options.catalogDbFile === undefined ? undefined : new CatalogStore(options.catalogDbFile);
+  if (catalogStore !== undefined) {
+    await catalogStore.initialize();
+  }
 
   const output = createWriteStream(options.outFile, { encoding: "utf8" });
   const writer = new JsonlWriter(output);
@@ -105,7 +113,7 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
           });
         });
         if (catalogStore !== undefined) {
-          catalogStore.recordJobs(jobs, startedAt);
+          await catalogStore.recordJobs(jobs, startedAt);
         }
 
         let emitted = 0;
@@ -136,17 +144,22 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     if (catalogStore !== undefined) {
-      catalogStore.finalizeRun(startedAt);
+      await catalogStore.finalizeRun(startedAt);
       if (options.catalogFile !== undefined) {
         await catalogStore.exportJsonl(options.catalogFile);
       }
+    }
+
+    // Optional: Enrich jobs with salary data by fetching job pages
+    if (options.enrichSalary) {
+      await enrichSalaryPhase(options);
     }
   } finally {
     if (progressTimer !== undefined) {
       clearInterval(progressTimer);
     }
     await writer.close();
-    catalogStore?.close();
+    if (catalogStore) await catalogStore.close();
   }
 
   const endedAt = new Date().toISOString();
@@ -164,6 +177,52 @@ export async function runCrawler(options: RunOptions): Promise<CrawlReport> {
   await writeFile(options.reportFile, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   logProgress("done", startedMs, completed, items.length, stats, failures.length, options.progressFile);
   return report;
+}
+
+/**
+ * Post-crawl phase: fetch job pages and extract salary data.
+ * Reads the output JSONL, enriches jobs with salary, writes back,
+ * and updates the catalog if a DB is configured.
+ */
+async function enrichSalaryPhase(options: RunOptions): Promise<void> {
+  console.log("[runner] Starting salary enrichment phase...");
+
+  // Read jobs from the output file
+  const jobs = await readJobsJsonl(options.outFile);
+  if (jobs.length === 0) {
+    console.log("[runner] No jobs to enrich.");
+    return;
+  }
+
+  const titleKeywords = parseTitleKeywords(options.jobTitleContains);
+  const filterNote = titleKeywords.length > 0
+    ? ` (filtering titles: ${titleKeywords.join(", ")})`
+    : "";
+
+  // Enrich with salary data
+  const { jobs: enrichedJobs, results } = await enrichJobsWithSalary(jobs, {
+    concurrency: options.salaryConcurrency ?? 4,
+    titleKeywords,
+  });
+
+  console.log(`[runner] Title filter:${filterNote}`);
+
+  // Write enriched jobs back to the output file
+  await writeJobsJsonl(options.outFile, enrichedJobs);
+
+  // Update catalog with enriched salary data
+  if (options.catalogDbFile !== undefined) {
+    const catalogStore = new CatalogStore(options.catalogDbFile);
+    try {
+      await catalogStore.initialize();
+      await catalogStore.recordJobs(enrichedJobs, "salary-enrichment");
+      await catalogStore.finalizeRun("salary-enrichment");
+    } finally {
+      await catalogStore.close();
+    }
+  }
+
+  console.log(`[runner] Salary enrichment complete: ${results.enriched} enriched, ${results.failed} failed, ${results.skipped} skipped`);
 }
 
 function initStats(): Record<Provider, ProviderStats> {

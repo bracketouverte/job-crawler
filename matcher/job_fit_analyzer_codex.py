@@ -20,8 +20,8 @@ except ImportError:  # pragma: no cover
     from .matching_intelligence_codex import build_match_context, build_profile_text, format_match_context
 
 # ============ CONFIGURATION ============
-NVIDIA_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_MODEL = "meta/llama-4-maverick-17b-128e-instruct"
+NVIDIA_URL = "http://127.0.0.1:1235/v1"
+DEFAULT_MODEL = "google/gemma-4-e2b"
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_PROFILE_DIR = os.environ.get("CAREER_OPS_DIR", "career-ops")
 DEFAULT_DIMENSION_SCORE = 3.0

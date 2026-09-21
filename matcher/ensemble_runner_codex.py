@@ -17,14 +17,12 @@ BASE_DIR = Path(__file__).parent
 DEFAULT_PROFILE_DIR = "career-ops"
 
 API_KEY = os.environ.get("NVIDIA_API_KEY", "").strip()
-URL = "https://integrate.api.nvidia.com/v1"
+URL = "http://127.0.0.1:1235/v1"
 
 SCORERS = [
-    "meta/llama-4-maverick-17b-128e-instruct",
-    "moonshotai/kimi-k2-instruct",
-    "deepseek-ai/deepseek-v3.2",
+    "google/gemma-4-e2b",
 ]
-SYNTHESIZER = "deepseek-ai/deepseek-v3.2"
+SYNTHESIZER = "google/gemma-4-e2b"
 
 _PRE_SCORING_CHECKS = """
 === PRE-SCORING CHECKS (apply before assigning dimension scores) ===

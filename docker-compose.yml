@@ -1,4 +1,35 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: job-crawler-postgres
+    environment:
+      POSTGRES_DB: ${PG_DB:-job_catalog}
+      POSTGRES_USER: ${PG_USER:-job_admin}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-job_admin_password}
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-job_admin} -d ${PG_DB:-job_catalog}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8888:8080"
+    environment:
+      - SEARXNG_HOSTNAME=localhost
+      - SEARXNG_SECRET=your-secret-key-here-change-this
+    volumes:
+      - ./searxng:/etc/searxng
+    restart: unless-stopped
+
   job-parser:
     build:
       context: ./matcher
@@ -26,16 +57,18 @@ services:
     working_dir: /app
     stdin_open: true
     tty: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       CAREER_OPS_DIR: ${CAREER_OPS_DIR:-career-ops}
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
-      NVIDIA_MODEL: ${NVIDIA_MODEL:-meta/llama-4-maverick-17b-128e-instruct}
-      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-}
+      NVIDIA_MODEL: ${NVIDIA_MODEL:-google/gemma-4-e2b}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-http://127.0.0.1:1235}
       NVIDIA_NIM_BASE_URL: ${NVIDIA_NIM_BASE_URL:-}
       NVIDIA_CHAT_COMPLETIONS_URL: ${NVIDIA_CHAT_COMPLETIONS_URL:-}
       NVIDIA_NIM_CHAT_COMPLETIONS_URL: ${NVIDIA_NIM_CHAT_COMPLETIONS_URL:-}
-      NVIDIA_ENSEMBLE_SCORERS: ${NVIDIA_ENSEMBLE_SCORERS:-}
-      NVIDIA_ENSEMBLE_SYNTHESIZER: ${NVIDIA_ENSEMBLE_SYNTHESIZER:-}
+      NVIDIA_ENSEMBLE_SCORERS: ${NVIDIA_ENSEMBLE_SCORERS:-google/gemma-4-e2b}
+      NVIDIA_ENSEMBLE_SYNTHESIZER: ${NVIDIA_ENSEMBLE_SYNTHESIZER:-google/gemma-4-e2b}
       NVIDIA_DEEPSEEK_REASONING_EFFORT: ${NVIDIA_DEEPSEEK_REASONING_EFFORT:-none}
     volumes:
       - ./matcher:/app
@@ -45,33 +78,73 @@ services:
     build:
       context: ./viewer
     depends_on:
-      - scheduler
+      postgres:
+        condition: service_healthy
+      title-filter:
+        condition: service_started
     env_file:
       - path: ./.env
         required: false
     ports:
       - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./viewer/public:/app/public:ro
       - ./crawler/state:/app/state
       - ./matcher:/matcher:ro
     environment:
       CATALOG_DB: /app/state/catalog.sqlite
+      # Postgres primary; viewer falls back to CATALOG_DB sqlite if PG_HOST empty or connection fails
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_DB: ${PG_DB:-job_catalog}
+      PG_USER: ${PG_USER:-job_admin}
+      PG_PASSWORD: ${PG_PASSWORD:-job_admin_password}
+      DATABASE_URL: ${DATABASE_URL:-}
+      CATALOG_DRIVER: ${CATALOG_DRIVER:-auto}
       CAREER_OPS_DIR: ${CAREER_OPS_DIR:-career-ops}
       LOGO_DEV_PUBLISHABLE_KEY: ${LOGO_DEV_PUBLISHABLE_KEY:-}
       LOGO_DEV_SECRET_KEY: ${LOGO_DEV_SECRET_KEY:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       SCORE_NOTIFY_MIN_SCORE: ${SCORE_NOTIFY_MIN_SCORE:-4}
       NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
-      NVIDIA_MODEL: ${NVIDIA_MODEL:-meta/llama-4-maverick-17b-128e-instruct}
-      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-}
+      NVIDIA_MODEL: ${NVIDIA_MODEL:-google/gemma-4-e2b}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-http://127.0.0.1:1235}
       NVIDIA_NIM_BASE_URL: ${NVIDIA_NIM_BASE_URL:-}
       NVIDIA_CHAT_COMPLETIONS_URL: ${NVIDIA_CHAT_COMPLETIONS_URL:-}
       NVIDIA_NIM_CHAT_COMPLETIONS_URL: ${NVIDIA_NIM_CHAT_COMPLETIONS_URL:-}
-      NVIDIA_ENSEMBLE_SCORERS: ${NVIDIA_ENSEMBLE_SCORERS:-}
-      NVIDIA_ENSEMBLE_SYNTHESIZER: ${NVIDIA_ENSEMBLE_SYNTHESIZER:-}
+      NVIDIA_ENSEMBLE_SCORERS: ${NVIDIA_ENSEMBLE_SCORERS:-google/gemma-4-e2b}
+      NVIDIA_ENSEMBLE_SYNTHESIZER: ${NVIDIA_ENSEMBLE_SYNTHESIZER:-google/gemma-4-e2b}
       NVIDIA_DEEPSEEK_REASONING_EFFORT: ${NVIDIA_DEEPSEEK_REASONING_EFFORT:-none}
+      TITLE_FILTER_URL: ${TITLE_FILTER_URL:-http://title-filter:8001/score}
+      TARGET_TITLES: ${TARGET_TITLES:-}
+      TARGET_TITLES_PATH: /app/public/target-titles.json
+      TITLE_MATCH_MIN_CONFIDENCE: ${TITLE_MATCH_MIN_CONFIDENCE:-0.85}
+      JOB_LOCATION_TYPE: ${JOB_LOCATION_TYPE:-}
+      JOB_LOCATION_METRO: ${JOB_LOCATION_METRO:-}
+      SALARY: ${SALARY:-}
     restart: unless-stopped
+
+  title-filter:
+    build:
+      context: ./title-filter
+    container_name: job-title-filter
+    ports:
+      - "${TITLE_FILTER_PORT:-8001}:8001"
+    environment:
+      PORT: 8001
+      LAYA_MODEL_REPO: ${LAYA_MODEL_REPO:-convaiinnovations/laya}
+      TITLE_MATCH_MIN_CONFIDENCE: ${TITLE_MATCH_MIN_CONFIDENCE:-0.85}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=4)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   scheduler:
     build:
@@ -88,15 +161,26 @@ services:
   crawler:
     build:
       context: ./crawler
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ./sources:/data/sources:ro
       - ./crawler/output:/app/output
       - ./crawler/state:/app/state
+    environment:
+      PG_HOST: ${PG_HOST:-postgres}
+      PG_PORT: ${PG_PORT:-5432}
+      PG_DB: ${PG_DB:-job_catalog}
+      PG_USER: ${PG_USER:-job_admin}
+      PG_PASSWORD: ${PG_PASSWORD:-job_admin_password}
+      DATABASE_URL: ${DATABASE_URL:-}
+      CATALOG_DRIVER: ${CATALOG_DRIVER:-auto}
     command:
       - --concurrency
       - "8"
       - --provider-concurrency
-      - ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2
+      - ashby=1,workday=4,lever=3,teamtailor=2,bamboohr=3,greenhouse=6,workable=2,smartrecruiters=2
       - --timeout-ms
       - "30000"
       - --retries
@@ -107,3 +191,7 @@ services:
       - /app/state/catalog.sqlite
       - --catalog-file
       - /app/output/current-jobs.jsonl
+
+volumes:
+  postgres_data:
+  hf_cache:

@@ -1,0 +1,4 @@
+# Laya-backed title filter. Keep the runtime dependency surface small:
+# laya pulls torch/transformers/huggingface_hub. Install a CPU torch first
+# (see Dockerfile) so the image stays GPU-free.
+laya>=0.1.0

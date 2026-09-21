@@ -1,4 +1,5 @@
 import { compactObjectStrings, firstString, joinStrings } from "../normalizers.js";
+import { extractCompensation, applySalaryToJob } from "../compensation.js";
 import { CrawlContext, NormalizedJob, ProviderCrawler, SourceEntry, WorkdaySource } from "../types.js";
 
 type WorkdayResponse = {
@@ -77,23 +78,39 @@ export function normalizeWorkdayJob(
   }
   
   const postedOn = firstString(job.postedOn);
-
-  return {
+  const compensationText = inferCompensation(job.bulletFields);
+  const baseJob: NormalizedJob = {
     provider: "workday",
     source_key: sourceKey,
     job_id: id,
     title: firstString(job.title),
     location: firstString(job.locationsText),
     employment_type: firstString(job.timeType, inferBullet(job.bulletFields, "time")),
-    compensation: inferCompensation(job.bulletFields),
+    compensation: compensationText,
     department: firstString(job.jobFamily),
     office: null,
     language: null,
     updated_at: postedOn,
     posted_at: parseWorkdayPostedAt(postedOn, fetchedAt),
     job_url: jobUrl,
-    fetched_at: fetchedAt
+    fetched_at: fetchedAt,
+    salary_min: null,
+    salary_max: null,
+    salary_currency: null,
+    salary_period: null,
+    salary_location: null,
+    salary_is_estimated: false,
+    work_mode: null,
   };
+
+  if (compensationText) {
+    const salary = extractCompensation(compensationText);
+    if (salary.min !== null) {
+      return applySalaryToJob(baseJob, salary);
+    }
+  }
+
+  return baseJob;
 }
 
 export function parseWorkdayPostedAt(value: string | null, fetchedAt: string): string | null {
