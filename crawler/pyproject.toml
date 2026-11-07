@@ -1,0 +1,30 @@
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+# field_quality.py is a pre-existing, unrelated manual diagnostic script,
+# not part of the crawler service itself (see the coverage omit below) --
+# excluded so `just crawler-lint` can run unscoped like the other services'
+# lint recipes without failing on it.
+exclude = ["field_quality.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.black]
+line-length = 110
+target-version = ["py312"]
+extend-exclude = "field_quality.py"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["."]
+# field_quality.py is a pre-existing, unrelated manual diagnostic script,
+# not part of the crawler service itself.
+omit = ["tests/*", "field_quality.py"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true

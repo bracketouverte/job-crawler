@@ -1,0 +1,270 @@
+.app {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 48px 32px 120px;
+}
+
+.app-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+}
+
+.app-header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+
+.crawl-status {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.app-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input[type="text"],
+select {
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.saved-search-strip {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.saved-search-chip[data-active="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.filter-row {
+  display: flex;
+  gap: var(--gap-h);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.filter-row-title input {
+  flex: 1;
+}
+
+fieldset {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  margin: 0;
+}
+
+legend {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+.provider-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--row-gap);
+}
+
+.job-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: var(--pad-y) var(--pad-x);
+  background: var(--surface);
+}
+
+.job-card-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.job-card-logo {
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.job-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.job-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.job-card-company {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.job-card-visited {
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.job-card-title {
+  display: block;
+  font-size: var(--title-size);
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  margin-bottom: 6px;
+}
+
+.job-card-title:hover {
+  text-decoration: underline;
+}
+
+.job-card-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.job-card-age {
+  color: var(--muted-2);
+}
+
+.job-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.job-card-star {
+  padding: 4px 8px;
+}
+
+.job-card-score-badge {
+  border-radius: 999px;
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.job-card-provider {
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.job-card-analysis {
+  margin-top: var(--row-gap);
+  padding-top: var(--row-gap);
+  border-top: 1px solid var(--line-2);
+}
+
+.job-card-analysis-tldr {
+  margin: 0 0 8px;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.job-card-analysis-bars {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 16px;
+}
+
+.job-card-analysis-bar-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.job-card-analysis-bar-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+  margin-top: 2px;
+}
+
+.job-card-analysis-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.job-card-analysis-pills {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 24px;
+}

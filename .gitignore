@@ -8,6 +8,8 @@ dist/
 __pycache__/
 *.py[cod]
 .env
+.coverage
+.ruff_cache/
 
 # Local crawler build/output artifacts (never commit)
 crawler/output/*

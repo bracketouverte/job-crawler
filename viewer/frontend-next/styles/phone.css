@@ -1,0 +1,94 @@
+/* Feed-specific rules: new classes plus phone-width (<=600px) layout. */
+
+.job-list-busy {
+  opacity: 0.6;
+  transition: opacity 120ms ease;
+}
+
+.job-card-failure,
+.queue-item-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  margin: 0;
+}
+
+img {
+  max-width: 100%;
+}
+
+@media (max-width: 600px) {
+  .app {
+    padding: 16px 16px 96px;
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .app-header-actions {
+    flex-wrap: wrap;
+  }
+
+  .filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filter-row input,
+  .filter-row select,
+  .filter-row fieldset {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  fieldset {
+    flex-wrap: wrap;
+  }
+
+  .saved-search-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .job-card {
+    padding: 14px;
+    min-width: 0;
+  }
+
+  .job-card-main {
+    flex-wrap: wrap;
+  }
+
+  .job-card-body {
+    min-width: 0;
+    flex-basis: calc(100% - 44px);
+    overflow-wrap: anywhere;
+  }
+
+  .job-card-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .job-card-analysis-bars {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .analysis-panel,
+  .queue-drawer {
+    width: 100%;
+  }
+
+  .modal {
+    width: calc(100vw - 32px);
+  }
+}

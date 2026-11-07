@@ -1,0 +1,29 @@
+[
+  {
+    "id": "tpm-soflo",
+    "label": "TPM, SoFlo",
+    "title": "technical product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
+    "location": "remote",
+    "company": "",
+    "sources": [],
+    "days": "3"
+  },
+  {
+    "id": "pm-soflo",
+    "label": "PM, SoFlo",
+    "title": "product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
+    "location": "remote",
+    "company": "",
+    "sources": [],
+    "days": "3"
+  },
+  {
+    "id": "saved-ai-product",
+    "label": "AI PM",
+    "title": "(ai,llm,agentic,platform) product (manager,owner,builder) -(associate,growth,marketing,salesforce)",
+    "location": "remote",
+    "company": "",
+    "sources": [],
+    "days": "3"
+  }
+]

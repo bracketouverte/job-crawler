@@ -1,0 +1,40 @@
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"*_codex.py" = ["E", "F", "I", "UP"]
+
+[tool.black]
+line-length = 110
+target-version = ["py312"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "*_codex.py",
+    "benchmark*.py",
+    "build_title_corpus.py",
+    "embed_retrieve.py",
+    "export_onnx.py",
+    "eval/*",
+    # Legacy subprocess-CLI scripts, superseded by lib/ + services/ (async FastAPI
+    # ports). Kept temporarily for the viewer's pre-Epic-14 subprocess fallback path.
+    "job_post_parser.py",
+    "job_fit_analyzer.py",
+    "ensemble_runner.py",
+    "matching_intelligence.py",
+]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true

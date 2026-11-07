@@ -13,13 +13,12 @@ docker compose run --rm crawler \
   --timeout-ms 30000 \
   --retries 5 \
   --exclude-sources /app/state/exclude.jsonl \
-  --catalog-db /app/state/catalog.sqlite \
-  --catalog-file /app/output/current-jobs.jsonl
+  --catalog-db /app/state/catalog.sqlite
 ```
 
 Outputs:
 - SQLite catalog: `crawler/state/catalog.sqlite`
-- Jobs JSONL: `crawler/output/current-jobs.jsonl`
+- Jobs JSONL: `crawler/output/jobs.jsonl`
 - Report: `crawler/output/report.json`
 
 ## CLI Options
@@ -45,9 +44,8 @@ Complete parameter list:
 
 Notes:
 
-- `--max-age-hours` filters on normalized `updated_at`. Jobs with missing or invalid `updated_at` are excluded when this flag is set.
+- `--max-age-hours` filters on normalized `updated_at`. Jobs with missing or invalid `updated_at` are excluded when this flag is set. This filtering applies only to `--out`'s JSONL export -- `--catalog-db` always keeps every job, so `last_seen_at` stays current regardless of age.
 - `--catalog-db` keeps the persistent SQLite state that powers the current-jobs catalog.
-- `--catalog-file` exports the latest catalog snapshot after the run.
 
 ## Run Modes
 
@@ -64,8 +62,7 @@ docker compose run --rm crawler \
   --timeout-ms 30000 \
   --retries 5 \
   --exclude-sources /app/state/exclude.jsonl \
-  --catalog-db /app/state/catalog.sqlite \
-  --catalog-file /app/output/current-jobs.jsonl
+  --catalog-db /app/state/catalog.sqlite
 ```
 
 To skip known-broken sources (404s/410s), add `--exclude-sources /app/state/exclude.jsonl`. The post-crawl hook automatically updates this file with new failures after each run.
@@ -80,8 +77,7 @@ docker compose run --rm crawler \
   --provider-concurrency ashby=2,workday=15,lever=15,icims=8 \
   --timeout-ms 20000 \
   --retries 3 \
-  --catalog-db /app/state/catalog.sqlite \
-  --catalog-file /app/output/current-jobs.jsonl
+  --catalog-db /app/state/catalog.sqlite
 ```
 
 ### Aggressive Mode
@@ -94,15 +90,14 @@ docker compose run --rm crawler \
   --provider-concurrency ashby=2,icims=10 \
   --timeout-ms 15000 \
   --retries 2 \
-  --catalog-db /app/state/catalog.sqlite \
-  --catalog-file /app/output/current-jobs.jsonl
+  --catalog-db /app/state/catalog.sqlite
 ```
 
 ## Output Files
 
 Default output directory: `crawler/output/`
 
-- `current-jobs.jsonl` — All jobs from latest run
+- `jobs.jsonl` — Jobs from latest run (deduped, filtered by `--max-age-hours` if set)
 - `report.json` — Statistics and failures summary
 
 The repository ignores all local artifacts (only `.gitkeep` is tracked).
@@ -114,13 +109,12 @@ Skip broken sources using an exclusion file:
 ```bash
 docker compose run --rm crawler \
   --exclude-sources /app/state/exclude.jsonl \
-  --catalog-db /app/state/catalog.sqlite \
-  --catalog-file /app/output/current-jobs.jsonl
+  --catalog-db /app/state/catalog.sqlite
 ```
 
 The exclusion file is a JSONL of sources that returned 404 or permanent errors in previous runs.
 This prevents re-crawling known-broken sources.
-When the crawler runs through the Docker entrypoint, the post-crawl hook automatically appends new `404`/`410` failures to `crawler/state/exclude.jsonl` after a successful run.
+After each successful run, the post-crawl hook (now run in-process by `main.py`, no longer a separate shell step) automatically appends new `404`/`410` failures to `crawler/state/exclude.jsonl`.
 
 ## Provider Notes
 

@@ -1,0 +1,47 @@
+/* Design tokens ported from the legacy viewer/public/feed.css to keep visual parity. */
+:root {
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --ink: #0a0a0a;
+  --ink-2: #1f2937;
+  --muted: #6b7280;
+  --muted-2: #9ca3af;
+  --line: #e7e5e4;
+  --line-2: #f0efed;
+  --accent: oklch(0.55 0.12 250);
+  --accent-soft: oklch(0.97 0.02 250);
+  --accent-line: oklch(0.88 0.06 250);
+  --danger: #b91c1c;
+  --gap-h: 12px;
+  --pad-y: 20px;
+  --pad-x: 24px;
+  --title-size: 18px;
+  --row-gap: 14px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "tnum" 1;
+}

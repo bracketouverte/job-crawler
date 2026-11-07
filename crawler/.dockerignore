@@ -1,4 +1,5 @@
-node_modules
-dist
 output
-npm-debug.log
+state
+__pycache__
+*.pyc
+.pytest_cache
